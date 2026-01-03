@@ -3,18 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "start": "vite",
-    "build": "tsc && vite build",
-    "build:dev": "vite build --mode development",
-    "build:prod": "vite build --mode production",
-    "vercel-build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "type-check": "tsc --noEmit",
-    "analyze": "vite build --mode production && vite-bundle-visualizer"
-  },
+"scripts": {
+  "dev": "vite",
+  "start": "vite",
+  "build": "tsc && vite build",
+  "build:dev": "vite build --mode development",
+  "build:prod": "vite build --mode production",
+  "lint": "eslint .",
+  "preview": "vite preview",
+  "type-check": "tsc --noEmit",
+  "analyze": "vite build --mode production && vite-bundle-visualizer"
+},
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
