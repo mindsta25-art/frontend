@@ -1,1 +1,0 @@
-import{f as s}from"./index-CgruMJ9X.js";const a=async()=>s.get("/payments/status"),t=async(a,t,e)=>s.post("/payments/initialize",{amount:a,items:t,callbackUrl:e}),e=async a=>s.get(`/payments/verify/${a}`);export{a as g,t as i,e as v};

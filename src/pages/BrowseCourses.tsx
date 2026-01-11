@@ -687,11 +687,6 @@ const BrowseCourses = () => {
                   </SelectContent>
                 </Select>
               </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -806,7 +801,9 @@ const BrowseCourses = () => {
                    filteredCourses.length === 1 ? '1 Course Available' : 
                    `${filteredCourses.length} Courses Available`}
                   {isLoadingBackground && (
-                    <Loader2 className="w-4 h-4 animate-spin text-purple-600" title="Loading more courses in background" />
+                    <span title="Loading more courses in background">
+                      <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
+                    </span>
                   )}
                 </h2>
                 <p className="text-sm text-muted-foreground">
