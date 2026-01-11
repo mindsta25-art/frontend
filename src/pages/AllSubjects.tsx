@@ -61,17 +61,18 @@ const AllSubjects = () => {
     const fetchSubjects = async () => {
       setLoading(true);
       try {
-        // If a grade is selected, fetch for that grade, else fetch for all (use '1' as default for demo)
-        const grade = selectedGrade !== 'All Grades' ? selectedGrade : '1';
-        const fetched = await import('@/api/lessons').then(m => m.getSubjectsByGrade(grade));
-        setSubjects(fetched || []);
+        // Fetch active subjects from the backend
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/subjects`);
+        const data = await response.json();
+        setSubjects(data || []);
       } catch (error) {
+        console.error('Error fetching subjects:', error);
         setSubjects([]);
       }
       setLoading(false);
     };
     fetchSubjects();
-  }, [selectedGrade]);
+  }, []);
 
   // Filter subjects based on search and category
   useEffect(() => {
