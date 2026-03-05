@@ -283,7 +283,7 @@ const MyLearning = () => {
       <main className="pt-24 pb-16 container mx-auto px-4">
         {/* Page Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">My Purchased Courses</h1>
+          <h1 className="text-3xl font-bold text-foreground mb-2">My Lessons Courses</h1>
           <p className="text-muted-foreground">View all your purchased lessons and track your learning progress</p>
         </div>
 
