@@ -827,7 +827,7 @@ export default function ReferralDashboard() {
                   </CardHeader>
                   <CardContent className="flex items-center justify-center py-6">
                     <motion.div 
-                      className="bg-white p-4 rounded-lg shadow"
+                      className="bg-white dark:bg-gray-100 p-4 rounded-lg shadow"
                       initial={{ scale: 0, rotate: -180 }}
                       animate={{ scale: 1, rotate: 0 }}
                       transition={{ delay: 0.3, type: "spring", stiffness: 200 }}
