@@ -583,7 +583,7 @@ export default function ReferralDashboard() {
 
                   <div>
                     <h4 className="font-semibold text-foreground mb-2">12. Contact & Support</h4>
-                    <p>For questions about the referral program, contact us at <a href="mailto:referrals@mindsta.com" className="text-purple-600 hover:underline">referrals@mindsta.com</a></p>
+                    <p>For questions about the referral program, contact us at <a href="mailto:referrals@mindsta.com.ng" className="text-purple-600 hover:underline">referrals@mindsta.com.ng</a></p>
                   </div>
 
                   <div className="pt-4 border-t border-border">
