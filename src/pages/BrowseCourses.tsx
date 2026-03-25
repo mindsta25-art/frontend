@@ -96,6 +96,8 @@ interface Course {
   topics: string[];     // lesson titles for topic-level search
   lessonIds: string[]; // lesson IDs for "continue where you left off"
   reviewCount: number; // number of reviews
+  lessonTitle?: string; // individual lesson title (when card represents one lesson)
+  lessonId?: string;    // specific lesson id for direct navigation
 }
 
 // Subject → category mapping
@@ -199,6 +201,8 @@ const BrowseCourses = () => {
 
   const isInitialLoad = useRef(true);
   const isFetchingRef = useRef(false);
+  // Ref-based loadedGrades so async callbacks always read the current set (avoids stale closures)
+  const loadedGradesRef = useRef<Set<string>>(new Set());
   // Always-current enrollment ref — used inside fetchCoursesForGrade to avoid stale closures
   const enrollmentsRef = useRef<Enrollment[]>((() => {
     try {
@@ -221,7 +225,7 @@ const BrowseCourses = () => {
     visible: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.1
+        staggerChildren: 0.04
       }
     }
   };
@@ -600,7 +604,7 @@ const BrowseCourses = () => {
         if (prevCourses.length === 0) return prevCourses;
         return prevCourses.map(course => ({
           ...course,
-          enrolled: enrollmentsData.some(e => isEnrolledUtil(e, course.subject, course.grade, course.term)),
+          enrolled: enrollmentsData.some(e => isEnrolledUtil(e, course.subject, course.grade, course.term, course.lessonId)),
         }));
       });
       
@@ -695,7 +699,7 @@ const BrowseCourses = () => {
       if (prev.length === 0) return prev;
       const updated = prev.map(course => ({
         ...course,
-        enrolled: enrollments.some(e => isEnrolledUtil(e, course.subject, course.grade, course.term)),
+        enrolled: enrollments.some(e => isEnrolledUtil(e, course.subject, course.grade, course.term, course.lessonId)),
       }));
       const changed = updated.some((c, i) => c.enrolled !== prev[i].enrolled);
       return changed ? updated : prev;
@@ -705,7 +709,7 @@ const BrowseCourses = () => {
   useEffect(() => {
     // Load ALL grades on initial load only after enrollments have been fetched
     // Wait for enrollments to be loaded (even if empty array)
-    if (enrollments !== null && loadedGrades.size === 0 && !isFetchingRef.current) {
+    if (enrollments !== null && loadedGradesRef.current.size === 0 && !isFetchingRef.current) {
       const loadAllGrades = async () => {
         // Load enrolled grades first so "My Purchased" tab is accurate immediately
         const enrolledGrades = [...new Set(enrollments.map(e => String(e.grade)))];
@@ -816,11 +820,12 @@ const BrowseCourses = () => {
   }, [searchQuery, selectedGrade, selectedSubject, selectedTerm, selectedTopic, selectedCategory, setSearchParams]);
 
   const fetchCoursesForGrade = async (grade: string) => {
-    if (loadedGrades.has(grade) || isFetchingRef.current) return; // Already loaded or currently fetching
+    if (loadedGradesRef.current.has(grade) || isFetchingRef.current) return; // Already loaded or currently fetching
     
     try {
       isFetchingRef.current = true;
-      setLoading(loadedGrades.size === 0); // Only show main loading on first load
+      // Show the main loading spinner only on the very first load (before any grade is loaded)
+      setLoading(loadedGradesRef.current.size === 0);
       
       const gradeValue = grade === "Common Entrance" ? "Common Entrance" : grade;
       const newCourses: Course[] = [];
@@ -861,71 +866,67 @@ const BrowseCourses = () => {
             getLessonsBySubjectAndGrade(subject.name, gradeValue, term),
             getQuizzesByFilters(subject.name, gradeValue, term)
           ])
-            .then(([lessons, quizzes]) => ({ subject, term, lessons, quizCount: quizzes.length, gradeValue }))
+            .then(([lessons, quizzes]) => ({ subject, term, lessons, quizzes, gradeValue }))
             .catch(err => {
               console.error(`Error fetching data for ${subject.name}:`, err);
-              return { subject, term, lessons: [], quizCount: 0, gradeValue };
+              return { subject, term, lessons: [], quizzes: [] as typeof quizzes, gradeValue };
             })
         )
       );
 
       const allLessons = await Promise.all(lessonPromises);
 
-      // Process all results
-      allLessons.forEach(({ subject, term, lessons, quizCount, gradeValue }) => {
+      // Process all results — push one card per individual lesson so each lesson is separately browseable
+      allLessons.forEach(({ subject, term, lessons, quizzes, gradeValue }) => {
         if (lessons.length > 0) {
           subjectsSet.add(subject.name);
-          
-          // Use enrollmentsRef.current — always current, never stale closure
-          const enrolled = enrollmentsRef.current.some(e =>
-            isEnrolledUtil(e, subject.name, gradeValue, term)
-          );
-          
-          const courseProgress = userProgress.filter(p => 
-            lessons.some(l => l.id === p.lessonId)
-          );
-          const completedCount = courseProgress.filter(p => p.completed).length;
-          const completionRate = lessons.length > 0 ? Math.round((completedCount / lessons.length) * 100) : 0;
           
           const validDifficulty = subject.difficulty && 
             ['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard', 'Beginner', 'Intermediate', 'Advanced'].includes(subject.difficulty)
             ? subject.difficulty as 'beginner' | 'intermediate' | 'advanced' | 'easy' | 'medium' | 'hard' | 'Beginner' | 'Intermediate' | 'Advanced'
             : 'beginner' as const;
-          
-          // Calculate total duration from all lessons in minutes
-          let totalDuration = 0;
-          for (const lesson of lessons) {
-            totalDuration += (lesson.duration || 30);
-          }
-          
-          // Format duration: show hours if ≥ 60 min, otherwise show minutes
-          const durationDisplay = totalDuration >= 60
-            ? `${Math.ceil(totalDuration / 60)}h`
-            : `${totalDuration}m`;
-          
-          // Use the first lesson's description if available, else empty
-          const description = lessons[0]?.description?.trim() || '';
-          
-          newCourses.push({
-            id: `${grade}-${term}-${subject.name}`,
-            subject: subject.name,
-            grade: grade,
-            term: term,
-            lessonCount: lessons.length,
-            quizCount,
-            description,
-            difficulty: validDifficulty,
-            estimatedHours: Math.ceil(totalDuration / 60), // Convert minutes to hours
-            durationDisplay,
-            completionRate,
-            enrolled,
-            price: subject.price || 0,
-            rating: subject.rating || 0,
-            studentCount: enrollmentCountsRef.current[`${subject.name}|${gradeValue}|${term}`] || 0,
-            imageUrl: lessons[0]?.imageUrl || undefined,
-            topics: lessons.map(l => l.title),
-            lessonIds: lessons.map(l => l.id),
-            reviewCount: 0,
+
+          // Push one card per individual lesson so each lesson appears as a separate entry
+          lessons.forEach(lesson => {
+            // Per-lesson enrollment count takes priority; fall back to subject-level count
+            const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
+            const subjectEnrollCount = enrollmentCountsRef.current[`${subject.name}|${gradeValue}|${term}`] || 0;
+            const studentCount = lessonEnrollCount || subjectEnrollCount;
+            // Check enrollment per lesson — only mark enrolled if there's a matching enrollment
+            // for this specific lessonId (new) OR a subject-level enrollment (legacy/backward compat)
+            const enrolled = enrollmentsRef.current.some(e =>
+              isEnrolledUtil(e, subject.name, gradeValue, term, lesson.id)
+            );
+
+            const lessonDuration = lesson.duration || 30;
+            const durationDisplay = lessonDuration >= 60
+              ? `${Math.ceil(lessonDuration / 60)}h`
+              : `${lessonDuration}m`;
+            const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
+
+            newCourses.push({
+              id: lesson.id,
+              subject: subject.name,
+              grade: grade,
+              term: term,
+              lessonTitle: lesson.title,
+              lessonId: lesson.id,
+              lessonCount: 1,
+              quizCount: quizzes.some(q => q.lessonId === lesson.id) ? 1 : 0,
+              description: lesson.description?.trim() || '',
+              difficulty: validDifficulty,
+              estimatedHours: Math.ceil(lessonDuration / 60),
+              durationDisplay,
+              completionRate: lessonCompleted ? 100 : 0,
+              enrolled,
+              price: subject.price || 0,
+              rating: subject.rating || 0,
+              studentCount,
+              imageUrl: lesson.imageUrl || undefined,
+              topics: [lesson.title],
+              lessonIds: [lesson.id],
+              reviewCount: 0,
+            });
           });
         }
       });
@@ -945,7 +946,7 @@ const BrowseCourses = () => {
           // Always re-check via the ref — this is the ONLY source of truth for enrolled status
           // regardless of what value was computed in the stale closure above.
           const isEnrolledNow = enrollmentsRef.current.some(e =>
-            isEnrolledUtil(e, newCourse.subject, newCourse.grade, newCourse.term)
+            isEnrolledUtil(e, newCourse.subject, newCourse.grade, newCourse.term, newCourse.lessonId)
           );
           const courseWithCorrectStatus = { ...newCourse, enrolled: isEnrolledNow };
 
@@ -962,12 +963,10 @@ const BrowseCourses = () => {
       });
       
       setLoadedGrades(prev => new Set([...prev, grade]));
+      loadedGradesRef.current = new Set([...loadedGradesRef.current, grade]);
       
-      // Load other grades in background after initial load
-      if (isInitialLoad.current) {
-        isInitialLoad.current = false;
-        setTimeout(() => loadRemainingGrades(grade), 100);
-      }
+      // Mark initial load done so subsequent grade fetches don't show the full-screen spinner
+      isInitialLoad.current = false;
     } catch (error) {
       console.error(`Error fetching courses for grade ${grade}:`, error);
       toast({
@@ -983,7 +982,8 @@ const BrowseCourses = () => {
 
   const loadRemainingGrades = async (excludeGrade: string) => {
     setIsLoadingBackground(true);
-    const remainingGrades = grades.filter(g => g !== excludeGrade && !loadedGrades.has(g));
+    // Use ref so we always see newly-loaded grades, not the stale closure value
+    const remainingGrades = grades.filter(g => g !== excludeGrade && !loadedGradesRef.current.has(g));
     
     for (const grade of remainingGrades) {
       await fetchCoursesForGrade(grade);
@@ -1018,7 +1018,8 @@ const BrowseCourses = () => {
       subject: course.subject, 
       grade: course.grade, 
       term: course.term,
-      price: course.price
+      price: course.price,
+      lessonId: course.lessonId, // pass the specific lesson ID for per-lesson enrollment
     });
     toast({
       title: "Added to cart",
@@ -1065,8 +1066,12 @@ const BrowseCourses = () => {
 
   const handleViewCourse = (course: Course) => {
     if (course.enrolled) {
-      // Navigate to course lessons if already purchased
-      navigate(`/subjects/${course.grade}/${course.subject}${course.term ? `?term=${course.term}` : ''}`);
+      // Navigate to course lessons if already purchased, pre-selecting the specific lesson
+      const params = new URLSearchParams();
+      if (course.term) params.set('term', course.term);
+      if (course.lessonId) params.set('lessonId', course.lessonId);
+      const qs = params.toString();
+      navigate(`/subjects/${course.grade}/${course.subject}${qs ? `?${qs}` : ''}`);
     } else {
       // Add to cart if not purchased
       handleAddToCart(course);
@@ -1084,14 +1089,21 @@ const BrowseCourses = () => {
     });
     
     try {
-      // Fetch all lessons for this course
-      const lessons = await getLessonsBySubjectAndGrade(course.subject, course.grade, course.term);
+      // If this card represents a single specific lesson, fetch only that lesson.
+      // Otherwise fetch all lessons for the subject/grade/term.
+      let lessons: Lesson[];
+      if (course.lessonId) {
+        const single = await getLessonById(course.lessonId);
+        lessons = single ? [single] : [];
+      } else {
+        lessons = await getLessonsBySubjectAndGrade(course.subject, course.grade, course.term);
+      }
       
       if (lessons.length > 0) {
         // Build a composite "course" object: each lesson becomes one curriculum section
         const compositeCourse: Lesson = {
           id: lessons[0].id,
-          title: course.subject, // Use subject name as the course title
+          title: course.lessonId ? (lessons[0].title || course.subject) : course.subject,
           subtitle: `Grade ${course.grade}${course.term ? ` • ${course.term}` : ''}`,
           description: lessons[0].description || course.description,
           subject: course.subject,
@@ -1292,7 +1304,7 @@ const BrowseCourses = () => {
                 <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
               <div className="text-left">
-                <p className="text-2xl font-bold text-green-600">{new Set(enrollments.map(e => `${e.subject}-${e.grade}`)).size}</p>
+                <p className="text-2xl font-bold text-green-600">{enrollments.length}</p>
                 <p className="text-sm text-muted-foreground">Enrolled Lessons</p>
               </div>
             </div>
@@ -1347,7 +1359,7 @@ const BrowseCourses = () => {
                       <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide mb-0.5">
                         ▶ Continue where you left off
                       </p>
-                      <p className="font-bold text-foreground truncate text-lg leading-tight">{lastCourse.subject}</p>
+                      <p className="font-bold text-foreground truncate text-lg leading-tight">{lastCourse.lessonTitle || lastCourse.subject}</p>
                       {lastLesson && (
                         <p className="text-sm font-medium text-indigo-700 dark:text-indigo-300 truncate max-w-xs">
                           Next: {lastLesson}
@@ -1364,7 +1376,12 @@ const BrowseCourses = () => {
                     </div>
                   </div>
                   <Button
-                    onClick={() => navigate(`/subjects/${lastCourse.grade}/${lastCourse.subject}${lastCourse.term ? `?term=${encodeURIComponent(lastCourse.term)}` : ''}`)}
+                    onClick={() => {
+                      const p = new URLSearchParams();
+                      if (lastCourse.term) p.set('term', lastCourse.term);
+                      if (lastCourse.lessonId) p.set('lessonId', lastCourse.lessonId);
+                      navigate(`/subjects/${lastCourse.grade}/${lastCourse.subject}${p.toString() ? `?${p}` : ''}`);
+                    }}
                     className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white flex-shrink-0 shadow-lg"
                     size="lg"
                   >
@@ -1482,7 +1499,7 @@ const BrowseCourses = () => {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-start justify-between gap-2">
                                   <h4 className="font-semibold text-sm group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors line-clamp-1">
-                                    {course.subject}
+                                    {course.lessonTitle || course.subject}
                                   </h4>
                                   {course.enrolled && (
                                     <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-xs flex-shrink-0">
@@ -2076,17 +2093,41 @@ const BrowseCourses = () => {
 
         {/* Courses Grid - Redesigned */}
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-8">
             {[...Array(6)].map((_, i) => (
-              <Card key={i} className="h-[480px] animate-pulse overflow-hidden">
-                <div className="h-48 bg-gradient-to-br from-purple-200 to-pink-200 dark:from-purple-900 dark:to-pink-900" />
-                <CardContent className="p-6 space-y-4">
-                  <div className="h-6 bg-muted rounded-lg w-3/4" />
-                  <div className="h-4 bg-muted rounded w-full" />
-                  <div className="h-4 bg-muted rounded w-2/3" />
+              <Card key={i} className="overflow-hidden">
+                {/* Shimmer thumbnail */}
+                <div className="relative h-32 sm:h-48 overflow-hidden bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 dark:from-purple-900/50 dark:via-pink-900/40 dark:to-blue-900/50">
+                  <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.4s_infinite] bg-gradient-to-r from-transparent via-white/30 dark:via-white/10 to-transparent" />
+                </div>
+                {/* Mobile compact skeleton */}
+                <div className="sm:hidden p-3 space-y-2">
+                  <div className="h-4 bg-muted rounded w-4/5 animate-pulse" />
+                  <div className="h-3 bg-muted rounded w-3/5 animate-pulse" />
+                  <div className="flex gap-1.5 mt-1">
+                    <div className="h-6 bg-muted rounded-full w-14 animate-pulse" />
+                    <div className="h-6 bg-muted rounded-full w-14 animate-pulse" />
+                  </div>
+                  <div className="h-8 bg-muted rounded-lg w-full mt-2 animate-pulse" />
+                </div>
+                {/* Desktop rich skeleton */}
+                <CardContent className="hidden sm:block p-5 space-y-4">
                   <div className="space-y-2">
-                    <div className="h-3 bg-muted rounded" />
-                    <div className="h-3 bg-muted rounded" />
+                    <div className="h-5 bg-muted rounded-lg w-3/4 animate-pulse" />
+                    <div className="h-4 bg-muted rounded w-1/2 animate-pulse" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="h-3 bg-muted rounded w-full animate-pulse" />
+                    <div className="h-3 bg-muted rounded w-5/6 animate-pulse" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[...Array(4)].map((_, j) => (
+                      <div key={j} className="h-12 bg-muted rounded-lg animate-pulse" />
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="h-10 bg-muted rounded-lg flex-1 animate-pulse" />
+                    <div className="h-10 bg-muted rounded-lg flex-1 animate-pulse" />
                   </div>
                 </CardContent>
               </Card>
@@ -2200,8 +2241,8 @@ const BrowseCourses = () => {
                               )}
                             </div>
                             <CardContent className="p-2.5">
-                              <p className="font-semibold text-xs truncate group-hover:text-purple-600 transition-colors">{course.subject}</p>
-                              <p className="text-xs text-muted-foreground">{course.term}</p>
+                              <p className="font-semibold text-xs truncate group-hover:text-purple-600 transition-colors">{course.lessonTitle || course.subject}</p>
+                              <p className="text-xs text-muted-foreground">{course.lessonTitle ? `${course.subject} · ` : ''}{course.term}</p>
                               <div className="flex items-center justify-between mt-1">
                                 <p className="text-sm font-bold text-purple-600">{formatCurrency(course.price)}</p>
                                 <div className="flex items-center gap-0.5">
@@ -2238,8 +2279,6 @@ const BrowseCourses = () => {
               <motion.div
                 key={course.id}
                 variants={fadeInUp}
-                whileHover={{ y: -8, scale: 1.02 }}
-                transition={{ type: "spring", stiffness: 300, damping: 20 }}
               >
                 {/* ── MOBILE: compact horizontal row ── */}
                 <div
@@ -2261,6 +2300,8 @@ const BrowseCourses = () => {
                         src={course.imageUrl || course.thumbnail}
                         alt={course.subject}
                         className="absolute inset-0 w-full h-full object-cover"
+                        loading="lazy"
+                        decoding="async"
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                       />
                     )}
@@ -2290,16 +2331,31 @@ const BrowseCourses = () => {
                   </div>
 
                   {/* Info */}
-                  <div className="p-2.5">
-                    <h4 className="font-bold text-[13px] leading-tight line-clamp-2 text-foreground mb-1">
-                      {course.subject}
+                  <div className="p-3">
+                    <h4 className="font-bold text-sm leading-tight line-clamp-2 text-foreground mb-1">
+                      {course.lessonTitle || course.subject}
                     </h4>
-                    <p className="text-[11px] text-muted-foreground mb-1.5">
-                      {course.grade === 'Common Entrance' ? 'CE' : `Gr.${course.grade}`} · {course.term.replace(' Term', '')}
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {course.lessonTitle ? `${course.subject} · ` : ''}{course.grade === 'Common Entrance' ? 'CE' : `Gr.${course.grade}`} · {course.term.replace(' Term', '')}
                     </p>
+                    {/* Stats chips */}
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {course.estimatedHours > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[11px] bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
+                          <Clock className="w-3 h-3" />
+                          {course.estimatedHours}h
+                        </span>
+                      )}
+                      {course.quizCount > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[11px] bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
+                          <Trophy className="w-3 h-3" />
+                          {course.quizCount} quiz{course.quizCount !== 1 ? 'zes' : ''}
+                        </span>
+                      )}
+                    </div>
                     {/* Rating */}
-                    <div className="flex items-center gap-1 mb-2">
-                      <span className="text-[11px] font-bold text-amber-600">{course.rating > 0 ? course.rating.toFixed(1) : '—'}</span>
+                    <div className="flex items-center gap-1 mb-2.5">
+                      <span className="text-xs font-bold text-amber-600">{course.rating > 0 ? course.rating.toFixed(1) : '—'}</span>
                       <div className="flex gap-px">
                         {[...Array(5)].map((_, i) => (
                           <Star key={i} className={`w-2.5 h-2.5 ${i < Math.floor(course.rating) ? 'fill-amber-400 text-amber-400' : 'fill-gray-200 text-gray-200 dark:fill-gray-700 dark:text-gray-700'}`} />
@@ -2308,47 +2364,58 @@ const BrowseCourses = () => {
                     </div>
                     {/* Progress bar for enrolled */}
                     {course.enrolled && course.completionRate > 0 && (
-                      <div className="mb-2">
+                      <div className="mb-2.5">
                         <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                           <div className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full" style={{ width: `${course.completionRate}%` }} />
                         </div>
-                        <p className="text-[10px] text-purple-600 font-medium mt-0.5">{course.completionRate}%</p>
+                        <p className="text-[10px] text-purple-600 font-medium mt-0.5">{course.completionRate}% complete</p>
                       </div>
                     )}
-                    {/* Price row */}
-                    <div className="flex items-center justify-between">
-                      {course.enrolled ? (
-                        <span className="text-[11px] font-semibold text-green-600 flex items-center gap-0.5">
-                          <CheckCircle className="w-3 h-3" /> Purchased
-                        </span>
-                      ) : (
-                        <span className="text-sm font-extrabold text-gray-900 dark:text-white">{formatCurrency(course.price)}</span>
-                      )}
-                      {course.enrolled ? (
+                    {/* Price + CTA */}
+                    {course.enrolled ? (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold text-green-600 flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" /> Purchased
+                        </p>
                         <button
-                          className="text-[10px] bg-green-600 hover:bg-green-700 text-white font-bold px-2 py-1 rounded-lg"
+                          className="w-full text-xs bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-lg"
                           onClick={(e) => { e.stopPropagation(); handleViewCourse(course); }}
                         >
-                          Continue
+                          Continue Learning
                         </button>
-                      ) : (
-                        <button
-                          className={`text-[10px] font-bold px-2 py-1 rounded-lg ${
-                            isInCart(course.subject, course.grade, course.term)
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                              : 'bg-purple-600 hover:bg-purple-700 text-white'
-                          }`}
-                          onClick={(e) => { e.stopPropagation(); handleAddToCart(course); }}
-                        >
-                          {isInCart(course.subject, course.grade, course.term) ? '✓ Cart' : '+ Cart'}
-                        </button>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-extrabold text-gray-900 dark:text-white">{formatCurrency(course.price)}</span>
+                          <span className="text-[10px] text-muted-foreground">{course.studentCount}+ students</span>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <button
+                            className="flex-1 text-xs border border-purple-300 text-purple-700 dark:text-purple-300 font-semibold py-2 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-950/30 disabled:opacity-50"
+                            onClick={(e) => { e.stopPropagation(); handlePreviewCourse(course); }}
+                            disabled={loadingPreviewId === course.id}
+                          >
+                            {loadingPreviewId === course.id ? '...' : 'Preview'}
+                          </button>
+                          <button
+                            className={`flex-1 text-xs font-bold py-2 rounded-lg ${
+                              isInCart(course.subject, course.grade, course.term)
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                : 'bg-purple-600 hover:bg-purple-700 text-white'
+                            }`}
+                            onClick={(e) => { e.stopPropagation(); handleAddToCart(course); }}
+                          >
+                            {isInCart(course.subject, course.grade, course.term) ? '✓ In Cart' : 'Add to Cart'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* ── DESKTOP (sm+): Full rich card ── */}
-                <Card className={`hidden sm:flex flex-col h-full group overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 ${
+                <Card className={`hidden sm:flex flex-col h-full group overflow-hidden shadow-xl hover:shadow-2xl hover:-translate-y-1 transition-all duration-200 ${
                   course.enrolled 
                     ? 'border-2 border-green-500 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-gray-900 ring-2 ring-green-200 dark:ring-green-900/50' 
                     : 'border-0 bg-gradient-to-br from-white to-purple-50/30 dark:from-gray-900 dark:to-purple-950/20'
@@ -2366,6 +2433,8 @@ const BrowseCourses = () => {
                           src={course.imageUrl || course.thumbnail} 
                           alt={course.subject}
                           className="absolute inset-0 w-full h-full object-cover"
+                          loading="lazy"
+                          decoding="async"
                           onError={(e) => {
                             (e.target as HTMLImageElement).style.display = 'none';
                           }}
@@ -2392,12 +2461,12 @@ const BrowseCourses = () => {
                       )}
                     </div>
                     
-                    {/* Purchased Ribbon - Top Right Corner */}
+                    {/* Enrolled Ribbon - Top Right Corner */}
                     {course.enrolled && (
                       <div className="absolute top-0 right-0 z-20">
-                        <div className="bg-green-600 text-white px-5 py-2 shadow-lg flex items-center gap-2 font-bold text-sm rounded-bl-lg">
-                          <CheckCircle className="w-4 h-4" />
-                          PURCHASED
+                        <div className="bg-green-600 text-white px-4 py-1.5 shadow-lg flex items-center gap-1.5 font-semibold text-xs rounded-bl-lg">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          ENROLLED
                         </div>
                       </div>
                     )}
@@ -2442,9 +2511,12 @@ const BrowseCourses = () => {
                   <CardHeader className="pb-3 pt-5">
                     <div className="cursor-pointer" onClick={() => handleViewCourse(course)}>
                       <CardTitle className="text-xl font-bold group-hover:text-purple-600 transition-colors line-clamp-2 mb-3">
-                        {course.subject}
+                        {course.lessonTitle || course.subject}
                       </CardTitle>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3 flex-wrap">
+                        {course.lessonTitle && (
+                          <><span className="font-medium text-foreground/70">{course.subject}</span><span>•</span></>
+                        )}
                         <div className="flex items-center gap-1">
                           <GraduationCap className="w-4 h-4 text-purple-600" />
                           <span className="font-medium">
@@ -2526,7 +2598,7 @@ const BrowseCourses = () => {
                         {course.enrolled ? (
                           <p className="text-sm font-semibold text-green-600 flex items-center gap-1">
                             <CheckCircle className="w-4 h-4" />
-                            Purchased
+                            Course Enrolled
                           </p>
                         ) : (
                           <p className="text-2xl font-bold text-purple-600">{formatCurrency(course.price)}</p>
@@ -2558,7 +2630,7 @@ const BrowseCourses = () => {
                           onClick={() => handleViewCourse(course)}
                         >
                           <PlayCircle className="w-4 h-4 mr-2 group-hover:scale-110 transition-transform" />
-                          Start Learning
+                          {course.completionRate > 0 ? 'Continue Learning' : 'Start Learning'}
                         </Button>
                       ) : (
                         <div className="flex gap-2">
@@ -2730,9 +2802,9 @@ const BrowseCourses = () => {
                         <BookOpen className="w-8 h-8 text-white" />
                       </div>
                       <CardContent className="p-3">
-                        <p className="font-semibold text-sm truncate group-hover:text-purple-600 transition-colors">{course.subject}</p>
+                        <p className="font-semibold text-sm truncate group-hover:text-purple-600 transition-colors">{course.lessonTitle || course.subject}</p>
                         <p className="text-xs text-muted-foreground truncate">
-                          {course.grade === "Common Entrance" ? "CE" : `Gr. ${course.grade}`} &bull; {course.term}
+                          {course.lessonTitle ? `${course.subject} · ` : ''}{course.grade === "Common Entrance" ? "CE" : `Gr. ${course.grade}`} &bull; {course.term}
                         </p>
                         {course.enrolled
                           ? <p className="text-xs text-green-600 font-medium mt-0.5">✓ Purchased</p>
@@ -2785,7 +2857,7 @@ const BrowseCourses = () => {
                       </div>
                     </div>
                     <CardContent className="p-4">
-                      <h3 className="font-bold text-lg mb-2 line-clamp-1">{course.subject}</h3>
+                      <h3 className="font-bold text-lg mb-2 line-clamp-1">{course.lessonTitle || course.subject}</h3>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
                         <Users className="w-4 h-4" />
                         <span>{course.studentCount}+ students enrolled</span>
@@ -2797,7 +2869,7 @@ const BrowseCourses = () => {
                           className={course.enrolled ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold" : ""}
                           onClick={() => {
                             if (course.enrolled) {
-                              navigate(`/subjects/${course.grade}/${course.subject}${course.term ? `?term=${course.term}` : ''}`);
+                              handleViewCourse(course);
                             } else if (!isInCart(course.subject, course.grade, course.term)) {
                               handleAddToCart(course);
                             } else {
@@ -2965,7 +3037,7 @@ const BrowseCourses = () => {
                         <CardContent className="p-4 flex flex-col gap-3">
                           <div>
                             <h3 className={`font-bold text-base mb-0.5 line-clamp-1 transition-colors ${style.accentText}`}>
-                              {course.subject}
+                              {course.lessonTitle || course.subject}
                             </h3>
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                               <span>{course.grade === 'Common Entrance' ? 'Common Entrance' : `Grade ${course.grade}`}</span>
@@ -3206,7 +3278,7 @@ const BrowseCourses = () => {
                                 {/* Card body */}
                                 <div className="p-3">
                                   <h4 className="font-semibold text-sm leading-snug line-clamp-2 text-foreground group-hover:text-purple-700 dark:group-hover:text-purple-400 transition-colors mb-1">
-                                    {course.subject}
+                                    {course.lessonTitle || course.subject}
                                   </h4>
                                   <p className="text-[11px] text-muted-foreground mb-2">
                                     {course.grade === 'Common Entrance' ? 'Common Entrance' : `Grade ${course.grade}`}
@@ -3308,7 +3380,8 @@ const BrowseCourses = () => {
               subject: selectedCourseForPreview.subject,
               grade: selectedCourseForPreview.grade,
               term: selectedCourseForPreview.term,
-              price: selectedCourseForPreview.price
+              price: selectedCourseForPreview.price,
+              lessonId: selectedCourseForPreview.id,
             });
             toast({
               title: "Added to cart",
@@ -3317,7 +3390,7 @@ const BrowseCourses = () => {
           }
         }}
         isEnrolled={selectedCourseForPreview ? enrollments.some(e =>
-          isEnrolledUtil(e, selectedCourseForPreview.subject, selectedCourseForPreview.grade, selectedCourseForPreview.term)
+          isEnrolledUtil(e, selectedCourseForPreview.subject, selectedCourseForPreview.grade, selectedCourseForPreview.term, selectedCourseForPreview.id)
         ) : false}
         isInCart={selectedCourseForPreview ? isInCart(
           selectedCourseForPreview.subject,
