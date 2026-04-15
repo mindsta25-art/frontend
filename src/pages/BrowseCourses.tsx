@@ -65,7 +65,7 @@ import {
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { useToast } from "@/hooks/use-toast";
 import { isEnrolled as isEnrolledUtil } from "@/utils/enrollmentUtils";
-import { getTermsByGrade, getSubjectsByGrade, getLessons, getLessonsBySubjectAndGrade, getLessonPreviewById, type Lesson } from "@/api/lessons";
+import { getLessons, getLessonPreviewById, type Lesson } from "@/api/lessons";
 import { getQuizzesByFilters } from "@/api/quizzes";
 import { getUserProgress, type UserProgress } from "@/api/progress";
 import { getStudentByUserId } from "@/api";
@@ -928,22 +928,20 @@ const Browselessons = () => {
   }, [loadingMore, hasMore]);
 
   const fetchlessonsForGrade = async (grade: string) => {
-    // Per-grade deduplication: skip if already loaded or currently being fetched
+    // Per-grade deduplication: skip if already loaded
     if (loadedGradesRef.current.has(grade)) return;
-    // Mark as in-flight immediately (before any await) to prevent duplicate calls
+    // Mark as in-flight immediately (before any await) to prevent duplicate concurrent calls
     isFetchingRef.current = true;
-    
+
     try {
       // Show the main loading spinner only on the very first load (before any grade is loaded)
       setLoading(loadedGradesRef.current.size === 0);
-      
+
       const gradeValue = grade === "Common Entrance" ? "Common Entrance" : grade;
       const newlessons: Course[] = [];
       const subjectsSet = new Set<string>();
 
-      const terms = await getTermsByGrade(gradeValue);
-
-      // Fetch enrollment counts if not yet loaded
+      // Fetch enrollment counts once (shared across all grades)
       if (Object.keys(enrollmentCountsRef.current).length === 0) {
         try {
           const { api } = await import('@/lib/apiClient');
@@ -957,150 +955,65 @@ const Browselessons = () => {
         }
       }
 
-      let termSubjects = [] as Array<{ term: string; subjects: any[] }>;
-      let fallbackLessons: Lesson[] = [];
-      let fallbackQuizCounts: Record<string, number> = {};
+      // Fetch all lessons + quizzes for this grade in parallel (2 requests total)
+      const [gradeLessons, gradeQuizzes] = await Promise.all([
+        getLessons(undefined, gradeValue).catch(err => {
+          console.error(`[Browselessons] lessons fetch failed for grade ${gradeValue}:`, err);
+          return [] as Lesson[];
+        }),
+        getQuizzesByFilters(undefined, gradeValue).catch(() => [] as any[]),
+      ]);
 
-      if (!terms.length) {
-        try {
-          fallbackLessons = await getLessons(undefined, gradeValue);
-          if (fallbackLessons.length > 0) {
-            const gradeQuizzes = await getQuizzesByFilters(undefined, gradeValue);
-            fallbackQuizCounts = gradeQuizzes.reduce((acc, quiz) => {
-              if (quiz.lessonId) {
-                acc[quiz.lessonId] = (acc[quiz.lessonId] || 0) + 1;
-              }
-              return acc;
-            }, {} as Record<string, number>);
-          }
-        } catch (err) {
-          console.error(`[Browselessons] Fallback fetch failed for grade ${gradeValue}:`, err);
-        }
-      } else {
-        termSubjects = await Promise.all(
-          terms.map(term => 
-            getSubjectsByGrade(gradeValue, term.name)
-              .then(subjects => ({ term: term.name, subjects }))
-              .catch(err => {
-                console.error(`Error fetching subjects for ${gradeValue} ${term.name}:`, err);
-                return { term: term.name, subjects: [] };
-              })
-          )
-        );
+      const quizCountMap: Record<string, number> = {};
+      for (const quiz of gradeQuizzes) {
+        if (quiz.lessonId) quizCountMap[quiz.lessonId] = (quizCountMap[quiz.lessonId] || 0) + 1;
       }
 
-      const allLessons = fallbackLessons.length > 0
-        ? [{ term: 'All Terms', subjects: [{ name: '', difficulty: 'beginner', price: 0, rating: 0, ratingsCount: 0, enrolledStudents: 0 }], lessons: fallbackLessons, quizzes: [], gradeValue }]
-        : await Promise.all(termSubjects.flatMap(({ term, subjects }) =>
-            subjects.map(subject =>
-              Promise.all([
-                getLessonsBySubjectAndGrade(subject.name, gradeValue, term),
-                getQuizzesByFilters(subject.name, gradeValue, term)
-              ])
-                .then(([lessons, quizzes]) => ({ subject, term, lessons, quizzes, gradeValue }))
-                .catch(err => {
-                  console.error(`Error fetching data for ${subject.name}:`, err);
-                  return { subject, term, lessons: [], quizzes: [], gradeValue };
-                })
-            )
-          ));
+      for (const lesson of gradeLessons) {
+        subjectsSet.add(lesson.subject);
 
-      if (fallbackLessons.length > 0) {
-        fallbackLessons.forEach(lesson => {
-          subjectsSet.add(lesson.subject);
-          const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
-          const subjectEnrollCount = enrollmentCountsRef.current[`${lesson.subject}|${gradeValue}|${lesson.term}`] || 0;
-          const studentCount = lessonEnrollCount || subjectEnrollCount;
-          const enrolled = enrollmentsRef.current.some(e =>
-            isEnrolledUtil(e, lesson.subject, gradeValue, lesson.term, lesson.id)
-          );
+        const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
+        const subjectEnrollCount = enrollmentCountsRef.current[`${lesson.subject}|${gradeValue}|${lesson.term}`] || 0;
+        const studentCount = lessonEnrollCount || subjectEnrollCount;
 
-          const lessonDuration = lesson.duration || 30;
-          const durationDisplay = lessonDuration >= 60
-            ? `${Math.ceil(lessonDuration / 60)}h`
-            : `${lessonDuration}m`;
-          const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
+        const enrolled = enrollmentsRef.current.some(e =>
+          isEnrolledUtil(e, lesson.subject, gradeValue, lesson.term, lesson.id)
+        );
 
-          newlessons.push({
-            id: lesson.id,
-            subject: lesson.subject,
-            grade: grade,
-            term: lesson.term,
-            lessonTitle: lesson.title,
-            lessonId: lesson.id,
-            lessonCount: 1,
-            quizCount: fallbackQuizCounts[lesson.id] || 0,
-            description: lesson.description?.trim() || '',
-            difficulty: lesson.difficulty as Course['difficulty'] || 'beginner',
-            estimatedHours: Math.ceil(lessonDuration / 60),
-            durationDisplay,
-            completionRate: lessonCompleted ? 100 : 0,
-            enrolled,
-            price: lesson.price ?? 0,
-            rating: lesson.rating ?? 0,
-            studentCount,
-            imageUrl: lesson.imageUrl || undefined,
-            topics: [lesson.title],
-            lessonIds: [lesson.id],
-            reviewCount: 0,
-            createdAt: lesson.createdAt,
-          });
-        });
-      } else {
-        // Process all results — push one card per individual lesson so each lesson is separately browseable
-        allLessons.forEach(({ subject, term, lessons, quizzes, gradeValue }) => {
-          if (lessons.length > 0) {
-            subjectsSet.add(subject.name);
-            
-            const validDifficulty = subject.difficulty && 
-              ['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard', 'Beginner', 'Intermediate', 'Advanced'].includes(subject.difficulty)
-              ? subject.difficulty as 'beginner' | 'intermediate' | 'advanced' | 'easy' | 'medium' | 'hard' | 'Beginner' | 'Intermediate' | 'Advanced'
-              : 'beginner' as const;
+        const lessonDuration = lesson.duration || 30;
+        const durationDisplay = lessonDuration >= 60
+          ? `${Math.ceil(lessonDuration / 60)}h`
+          : `${lessonDuration}m`;
+        const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
 
-            // Push one card per individual lesson so each lesson appears as a separate entry
-            lessons.forEach(lesson => {
-              // Per-lesson enrollment count takes priority; fall back to subject-level count
-              const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
-              const subjectEnrollCount = enrollmentCountsRef.current[`${subject.name}|${gradeValue}|${term}`] || 0;
-              const studentCount = lessonEnrollCount || subjectEnrollCount;
-              // Check enrollment per lesson — only mark enrolled if there's a matching enrollment
-              // for this specific lessonId (new) OR a subject-level enrollment (legacy/backward compat)
-              const enrolled = enrollmentsRef.current.some(e =>
-                isEnrolledUtil(e, subject.name, gradeValue, term, lesson.id)
-              );
+        const validDifficulty = lesson.difficulty &&
+          ['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard', 'Beginner', 'Intermediate', 'Advanced'].includes(lesson.difficulty)
+          ? lesson.difficulty as Course['difficulty']
+          : 'beginner' as const;
 
-              const lessonDuration = lesson.duration || 30;
-              const durationDisplay = lessonDuration >= 60
-                ? `${Math.ceil(lessonDuration / 60)}h`
-                : `${lessonDuration}m`;
-              const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
-
-              newlessons.push({
-                id: lesson.id,
-                subject: subject.name,
-                grade: grade,
-                term: term,
-                lessonTitle: lesson.title,
-                lessonId: lesson.id,
-                lessonCount: 1,
-                quizCount: quizzes.some(q => q.lessonId === lesson.id) ? 1 : 0,
-                description: lesson.description?.trim() || '',
-                difficulty: validDifficulty,
-                estimatedHours: Math.ceil(lessonDuration / 60),
-                durationDisplay,
-                completionRate: lessonCompleted ? 100 : 0,
-                enrolled,
-                price: lesson.price ?? subject.price ?? 0,
-                rating: lesson.rating ?? subject.rating ?? 0,
-                studentCount,
-                imageUrl: lesson.imageUrl || undefined,
-                topics: [lesson.title],
-                lessonIds: [lesson.id],
-                reviewCount: 0,
-                createdAt: lesson.createdAt,
-              });
-            });
-          }
+        newlessons.push({
+          id: lesson.id,
+          subject: lesson.subject,
+          grade,
+          term: lesson.term,
+          lessonTitle: lesson.title,
+          lessonId: lesson.id,
+          lessonCount: 1,
+          quizCount: quizCountMap[lesson.id] || 0,
+          description: lesson.description?.trim() || '',
+          difficulty: validDifficulty,
+          estimatedHours: Math.ceil(lessonDuration / 60),
+          durationDisplay,
+          completionRate: lessonCompleted ? 100 : 0,
+          enrolled,
+          price: lesson.price ?? 0,
+          rating: lesson.rating ?? 0,
+          studentCount,
+          imageUrl: lesson.imageUrl || undefined,
+          topics: [lesson.title],
+          lessonIds: [lesson.id],
+          reviewCount: 0,
+          createdAt: lesson.createdAt,
         });
       }
 
