@@ -98,6 +98,7 @@ interface Course {
   reviewCount: number; // number of reviews
   lessonTitle?: string; // individual lesson title (when card represents one lesson)
   lessonId?: string;    // specific lesson id for direct navigation
+  createdAt?: string;   // ISO date string for "New" badge logic
 }
 
 // Subject → category mapping
@@ -245,9 +246,10 @@ const Browselessons = () => {
   };
 
   // Helper functions
-  const isNewCourse = (lessonCount: number) => {
-    // Consider lessons added in last 7 days as "new" (simplified check)
-    return lessonCount < 5; // Placeholder logic
+  const isNewCourse = (createdAt?: string) => {
+    if (!createdAt) return false;
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return new Date(createdAt).getTime() > sevenDaysAgo;
   };
 
   const isPopular = (course: Course) => {
@@ -775,11 +777,19 @@ const Browselessons = () => {
           ...grades.filter(g => !enrolledGrades.includes(g)),
         ];
         console.log('[Browselessons] Loading grades in priority order:', orderedGrades);
-        for (const grade of orderedGrades) {
-          await fetchlessonsForGrade(grade);
+        // Load first grade (student's enrolled grade) immediately for fast initial paint
+        if (orderedGrades.length > 0) {
+          await fetchlessonsForGrade(orderedGrades[0]);
+        }
+        // Load remaining grades 3 at a time for speed without flooding the server
+        for (let i = 1; i < orderedGrades.length; i += 3) {
+          await Promise.all(orderedGrades.slice(i, i + 3).map(g => fetchlessonsForGrade(g)));
         }
       };
       loadAllGrades();
+    } else if (!authLoading && !user?.id) {
+      // Auth resolved but no user logged in — stop spinner so the page renders
+      setLoading(false);
     }
   }, [authLoading, user?.id, enrollments]);
 
@@ -918,10 +928,12 @@ const Browselessons = () => {
   }, [loadingMore, hasMore]);
 
   const fetchlessonsForGrade = async (grade: string) => {
-    if (loadedGradesRef.current.has(grade) || isFetchingRef.current) return; // Already loaded or currently fetching
+    // Per-grade deduplication: skip if already loaded or currently being fetched
+    if (loadedGradesRef.current.has(grade)) return;
+    // Mark as in-flight immediately (before any await) to prevent duplicate calls
+    isFetchingRef.current = true;
     
     try {
-      isFetchingRef.current = true;
       // Show the main loading spinner only on the very first load (before any grade is loaded)
       setLoading(loadedGradesRef.current.size === 0);
       
@@ -1031,6 +1043,7 @@ const Browselessons = () => {
             topics: [lesson.title],
             lessonIds: [lesson.id],
             reviewCount: 0,
+            createdAt: lesson.createdAt,
           });
         });
       } else {
@@ -1077,13 +1090,14 @@ const Browselessons = () => {
                 durationDisplay,
                 completionRate: lessonCompleted ? 100 : 0,
                 enrolled,
-                price: subject.price || 0,
-                rating: subject.rating || 0,
+                price: lesson.price ?? subject.price ?? 0,
+                rating: lesson.rating ?? subject.rating ?? 0,
                 studentCount,
                 imageUrl: lesson.imageUrl || undefined,
                 topics: [lesson.title],
                 lessonIds: [lesson.id],
                 reviewCount: 0,
+                createdAt: lesson.createdAt,
               });
             });
           }
@@ -1144,10 +1158,9 @@ const Browselessons = () => {
     // Use ref so we always see newly-loaded grades, not the stale closure value
     const remainingGrades = grades.filter(g => g !== excludeGrade && !loadedGradesRef.current.has(g));
     
-    for (const grade of remainingGrades) {
-      await fetchlessonsForGrade(grade);
-      // Small delay to prevent overwhelming the server
-      await new Promise(resolve => setTimeout(resolve, 50));
+    // Load 3 at a time instead of sequentially
+    for (let i = 0; i < remainingGrades.length; i += 3) {
+      await Promise.all(remainingGrades.slice(i, i + 3).map(g => fetchlessonsForGrade(g)));
     }
     
     setIsLoadingBackground(false);
@@ -1710,7 +1723,7 @@ const Browselessons = () => {
 
             {/* ── Desktop Filters (always visible) / Mobile Filters (collapsible) ── */}
             <AnimatePresence initial={false}>
-              {(showMobileFilters || true) && (
+              {(
                 <motion.div
                   key="filters-panel"
                   initial={false}
@@ -2513,7 +2526,7 @@ const Browselessons = () => {
                           <CheckCircle className="w-3.5 h-3.5 text-white" />
                         </div>
                       </div>
-                    ) : isNewCourse(course.lessonCount) ? (
+                    ) : isNewCourse(course.createdAt) ? (
                       <div className="absolute top-2 left-2">
                         <span className="bg-amber-400 text-amber-900 text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase leading-none">New</span>
                       </div>
@@ -2669,7 +2682,7 @@ const Browselessons = () => {
                     
                     {/* Top Left Badges */}
                     <div className="absolute top-2 left-2 flex flex-col gap-1">
-                      {isNewCourse(course.lessonCount) && !course.enrolled && (
+                      {isNewCourse(course.createdAt) && !course.enrolled && (
                         <Badge className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white border-0 shadow-lg">
                           <Sparkles className="w-3 h-3 mr-1" />
                           NEW
@@ -2730,34 +2743,81 @@ const Browselessons = () => {
                     </div>
                   </div>
 
-                  <CardHeader className="pb-3 pt-5">
+                  <CardHeader className="pb-2 pt-4">
                     <div className="cursor-pointer" onClick={() => handleViewCourse(course)}>
-                      <CardTitle className="text-xl font-bold group-hover:text-purple-600 transition-colors line-clamp-2 mb-3">
+                      {/* Rating row */}
+                      <div className="flex items-center gap-1.5 mb-2">
+                        {course.rating > 0 ? (
+                          <>
+                            <span className="text-xs font-extrabold text-amber-600 dark:text-amber-400">{course.rating.toFixed(1)}</span>
+                            <div className="flex items-center gap-0.5">
+                              {[...Array(5)].map((_, i) => (
+                                <Star
+                                  key={i}
+                                  className={`w-3 h-3 ${
+                                    i < Math.round(course.rating)
+                                      ? 'fill-amber-400 text-amber-400'
+                                      : 'text-gray-300 dark:text-gray-600'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            {course.reviewCount > 0 && (
+                              <span className="text-xs text-muted-foreground">({course.reviewCount})</span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">No ratings yet</span>
+                        )}
+                        {course.studentCount > 0 && (
+                          <>
+                            <span className="text-muted-foreground/40 text-xs">·</span>
+                            <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                              <Users className="w-3 h-3" />
+                              {course.studentCount.toLocaleString()} students
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <CardTitle className="text-lg font-extrabold group-hover:text-purple-600 transition-colors line-clamp-2 leading-snug mb-1.5">
                         {course.lessonTitle || course.subject}
                       </CardTitle>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3 flex-wrap">
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground flex-wrap mb-2">
                         {course.lessonTitle && (
-                          <><span className="font-medium text-foreground/70">{course.subject}</span><span>•</span></>
+                          <span className="font-semibold text-foreground/60">{course.subject}</span>
                         )}
-                        <div className="flex items-center gap-1">
-                          <GraduationCap className="w-4 h-4 text-purple-600" />
-                          <span className="font-medium">
-                            {course.grade === "Common Entrance" ? "Common Entrance" : `Grade ${course.grade}`}
-                          </span>
+                        {course.lessonTitle && <span>·</span>}
+                        <div className="flex items-center gap-0.5">
+                          <GraduationCap className="w-3 h-3 text-purple-500" />
+                          <span>{course.grade === "Common Entrance" ? "Common Entrance" : `Grade ${course.grade}`}</span>
                         </div>
-                        <span>•</span>
-                        <span className="font-medium">{course.term}</span>
+                        <span>·</span>
+                        <span>{course.term}</span>
+                        {course.durationDisplay && (
+                          <>
+                            <span>·</span>
+                            <Clock className="w-3 h-3" />
+                            <span>{course.durationDisplay}</span>
+                          </>
+                        )}
+                        {course.quizCount > 0 && (
+                          <>
+                            <span>·</span>
+                            <Trophy className="w-3 h-3" />
+                            <span>{course.quizCount} quiz</span>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     {/* Progress Bar for Enrolled lessons */}
                     {course.enrolled && course.completionRate > 0 && (
-                      <div className="space-y-1 mb-3">
+                      <div className="space-y-1 mb-2">
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-medium text-purple-600">Progress</span>
                           <span className="font-bold">{course.completionRate}%</span>
                         </div>
-                        <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                           <div 
                             className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-300"
                             style={{ width: `${course.completionRate}%` }}
@@ -2766,126 +2826,66 @@ const Browselessons = () => {
                       </div>
                     )}
 
-                    <CardDescription className="text-sm line-clamp-2 leading-relaxed">
+                    <CardDescription className="text-xs line-clamp-2 leading-relaxed">
                       {course.description}
                     </CardDescription>
                   </CardHeader>
 
-                  <CardContent className="pt-0 pb-5 flex flex-col gap-4">
-                    {/* Course Stats Grid */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="flex items-center gap-2 text-sm bg-purple-50 dark:bg-purple-950/30 p-2 rounded-lg">
-                        <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900/50 rounded-lg flex items-center justify-center">
-                          <BookOpen className="w-4 h-4 text-purple-600" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-foreground">{course.lessonCount}</p>
-                          <p className="text-xs text-muted-foreground">Lessons</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm bg-blue-50 dark:bg-blue-950/30 p-2 rounded-lg">
-                        <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/50 rounded-lg flex items-center justify-center">
-                          <Trophy className="w-4 h-4 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-foreground">{course.quizCount}</p>
-                          <p className="text-xs text-muted-foreground">Quizzes</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm bg-green-50 dark:bg-green-950/30 p-2 rounded-lg">
-                        <div className="w-8 h-8 bg-green-100 dark:bg-green-900/50 rounded-lg flex items-center justify-center">
-                          <Clock className="w-4 h-4 text-green-600" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-foreground">
-                            {course.durationDisplay || (course.estimatedHours > 0 ? `${course.estimatedHours}h` : '30m')}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Duration</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm bg-amber-50 dark:bg-amber-950/30 p-2 rounded-lg">
-                        <div className="w-8 h-8 bg-amber-100 dark:bg-amber-900/50 rounded-lg flex items-center justify-center">
-                          <Star className="w-4 h-4 text-amber-600 fill-amber-600" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-foreground">{course.rating}</p>
-                          <p className="text-xs text-muted-foreground">Rating</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Price and Student Count */}
-                    <div className="flex items-center justify-between py-3 border-t border-purple-100 dark:border-purple-900/30">
-                      <div>
-                        {course.enrolled ? (
-                          <p className="text-sm font-semibold text-green-600 flex items-center gap-1">
-                            <CheckCircle className="w-4 h-4" />
-                            Course Enrolled
-                          </p>
-                        ) : (
-                          <p className="text-2xl font-bold text-purple-600">{formatCurrency(course.price)}</p>
-                        )}
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                          <Users className="w-3 h-3" />
-                          {course.studentCount}+ students
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {[...Array(5)].map((_, i) => (
-                          <Star
-                            key={i}
-                            className={`w-3 h-3 ${
-                              i < Math.floor(course.rating)
-                                ? 'fill-amber-400 text-amber-400'
-                                : 'text-gray-300'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-col gap-2">
+                  <CardContent className="pt-0 pb-4 flex flex-col gap-3 mt-auto">
+                    {/* Price, CTA, Preview */}
+                    <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
                       {course.enrolled ? (
                         <Button 
-                          className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg hover:shadow-xl transition-all duration-300 group font-bold"
+                          className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-md font-bold"
                           onClick={() => handleViewCourse(course)}
                         >
-                          <PlayCircle className="w-4 h-4 mr-2 group-hover:scale-110 transition-transform" />
+                          <PlayCircle className="w-4 h-4 mr-2" />
                           {course.completionRate > 0 ? 'Continue Learning' : 'Start Learning'}
                         </Button>
                       ) : (
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="outline"
-                            className="flex-1 border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 hover:text-purple-900 dark:hover:text-purple-100"
-                            onClick={() => handlePreviewCourse(course)}
-                            disabled={loadingPreviewId === course.id}
-                          >
-                            {loadingPreviewId === course.id ? (
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                              <Eye className="w-4 h-4 mr-2" />
-                            )}
-                            Preview
-                          </Button>
-                          <Button 
-                            className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg hover:shadow-xl transition-all duration-300 group"
-                            onClick={() => handleAddToCart(course)}
-                            disabled={isInCart(course.subject, course.grade, course.term, course.lessonId)}
-                          >
-                            {isInCart(course.subject, course.grade, course.term, course.lessonId) ? (
-                              <>
-                                <CheckCircle className="w-4 h-4 mr-2" />
-                                In Cart
-                              </>
-                            ) : (
-                              <>
-                                <ShoppingCart className="w-4 h-4 mr-2 group-hover:scale-110 transition-transform" />
-                                Add to Cart
-                              </>
-                            )}
-                          </Button>
+                        <div className="space-y-2">
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-2xl font-extrabold text-gray-900 dark:text-white leading-none">
+                              {formatCurrency(course.price)}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <Award className="w-3.5 h-3.5 text-purple-500" />
+                              <span className="text-[10px] text-muted-foreground font-medium">Certificate</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="outline"
+                              size="sm"
+                              className="flex-shrink-0 border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 text-purple-700 dark:text-purple-300 px-3"
+                              onClick={() => handlePreviewCourse(course)}
+                              disabled={loadingPreviewId === course.id}
+                            >
+                              {loadingPreviewId === course.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Eye className="w-4 h-4" />
+                              )}
+                            </Button>
+                            <Button 
+                              className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-md font-bold"
+                              size="sm"
+                              onClick={() => handleAddToCart(course)}
+                              disabled={isInCart(course.subject, course.grade, course.term, course.lessonId)}
+                            >
+                              {isInCart(course.subject, course.grade, course.term, course.lessonId) ? (
+                                <>
+                                  <CheckCircle className="w-4 h-4 mr-1.5" />
+                                  In Cart
+                                </>
+                              ) : (
+                                <>
+                                  <ShoppingCart className="w-4 h-4 mr-1.5 group-hover:scale-110 transition-transform" />
+                                  Add to Cart
+                                </>
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>

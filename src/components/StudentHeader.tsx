@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, memo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCart } from "@/contexts/CartContext";
+import { useWishlist } from "@/contexts/WishlistContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -86,7 +87,7 @@ const StudentHeaderComponent = ({ studentName }: StudentHeaderProps) => {
   const location = useLocation();
   const { user, refreshUser } = useAuth();
   const { cart, cartCount, removeFromCart } = useCart();
-  const { wishlistCount } = useWishlistSafe();
+  const { wishlistCount } = useWishlist();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -253,18 +254,6 @@ const StudentHeaderComponent = ({ studentName }: StudentHeaderProps) => {
     const firstName = name.split(' ')[0];
     return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
   };
-
-  // Safe access to wishlist context (header may be used on pages before provider mounts)
-  function useWishlistSafe() {
-    try {
-      // Lazy require to avoid import cycle at top
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { useWishlist } = require('@/contexts/WishlistContext');
-      return useWishlist();
-    } catch {
-      return { wishlistCount: 0 } as any;
-    }
-  }
 
   // Trigger a subtle bump animation on the wishlist badge when count changes
   useEffect(() => {

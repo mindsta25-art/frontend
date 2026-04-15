@@ -42,7 +42,7 @@ import {
   getUserTypes,
   getPaymentStatusDistribution,
   getStudentGrades,
-  getAllProfiles
+  getOnlineCount
 } from "@/api";
 import { getSalesAnalytics, SalesAnalytics } from "@/api/payments";
 import { getSalesStats, SalesStats } from "@/api/admin";
@@ -115,8 +115,7 @@ const AdminDashboard = () => {
 
   const fetchOnlineCount = async () => {
     try {
-      const profiles = await getAllProfiles();
-      const count = profiles.filter((p: any) => p.isOnline).length;
+      const { count } = await getOnlineCount();
       setOnlineCount(count);
     } catch (error) {
       console.error('Error fetching online count:', error);

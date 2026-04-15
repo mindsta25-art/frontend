@@ -294,7 +294,7 @@ export const CoursePreviewDialog = ({
                 Course Content
               </h3>
               <p className="text-xs sm:text-sm text-muted-foreground">
-                {course.curriculum?.length || 0} lessons • {getTotalLectures()} lectures • {formatDuration(getTotalDuration())} total
+                {course.curriculum?.length || 0} lessons • {getTotalLectures()} lectures • {formatDuration(getTotalDuration())} total
               </p>
             </div>
 

@@ -29,3 +29,16 @@ export const getAllProfiles = async (): Promise<UserProfile[]> => {
     return [];
   }
 };
+
+/**
+ * Get count of currently online users (admin only – lean, no full payload)
+ */
+export const getOnlineCount = async (): Promise<{ count: number }> => {
+  try {
+    const result = await api.get('/profiles/online-count');
+    return result;
+  } catch (error) {
+    console.error('Error fetching online count:', error);
+    return { count: 0 };
+  }
+};
