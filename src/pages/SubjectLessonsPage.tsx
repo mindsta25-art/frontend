@@ -694,15 +694,20 @@ const SubjectLessonsPage = () => {
           requirements: fullLesson.requirements,
           targetAudience: fullLesson.targetAudience,
         } : prev);
-      }
-    } catch (error: any) {
-      if (error?.response?.status === 403) {
+      } else {
         toast({
-          title: 'Course not purchased',
-          description: 'Please purchase this course to access lesson content.',
+          title: 'Lesson Locked',
+          description: 'You do not have access to this lesson yet. Please purchase the course to unlock it.',
           variant: 'destructive',
         });
       }
+    } catch (error: any) {
+      console.error('Error loading lesson content:', error);
+      toast({
+        title: 'Error loading lesson',
+        description: 'Unable to load lesson content right now. Please try again later.',
+        variant: 'destructive',
+      });
     }
 
     // Fetch quiz for the selected lesson

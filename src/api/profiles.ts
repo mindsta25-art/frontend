@@ -10,6 +10,9 @@ export interface UserProfile {
   email: string;
   fullName: string;
   userType: string;
+  status?: string;
+  isOnline?: boolean;
+  lastActiveAt?: string;
   createdAt: string;
   updatedAt?: string;
 }

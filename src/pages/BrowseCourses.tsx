@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
@@ -65,7 +65,7 @@ import {
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { useToast } from "@/hooks/use-toast";
 import { isEnrolled as isEnrolledUtil } from "@/utils/enrollmentUtils";
-import { getTermsByGrade, getSubjectsByGrade, getLessonsBySubjectAndGrade, getLessonById, type Lesson } from "@/api/lessons";
+import { getTermsByGrade, getSubjectsByGrade, getLessons, getLessonsBySubjectAndGrade, getLessonPreviewById, type Lesson } from "@/api/lessons";
 import { getQuizzesByFilters } from "@/api/quizzes";
 import { getUserProgress, type UserProgress } from "@/api/progress";
 import { getStudentByUserId } from "@/api";
@@ -119,7 +119,7 @@ const CATEGORY_COLOR_PALETTE: string[] = [
 
 const Browselessons = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { addToCart, isInCart } = useCart();
   const { wishlist, addToWishlist, removeFromWishlist, isInWishlist } = useWishlist();
   const { toast } = useToast();
@@ -156,6 +156,7 @@ const Browselessons = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 10000]);
+  const [isPriceFilterActive, setIsPriceFilterActive] = useState(false);
   const [selectedDifficulties, setSelectedDifficulties] = useState<string[]>([]);
   const [minRating, setMinRating] = useState(0);
   const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
@@ -203,6 +204,14 @@ const Browselessons = () => {
   // Enrollment counts per subject-grade-term (for student count display)
   const [enrollmentCounts, setEnrollmentCounts] = useState<Record<string, number>>({});
   const enrollmentCountsRef = useRef<Record<string, number>>({});
+
+  const maxPriceLimit = useMemo(() => {
+    const maxPriceFromLessons = lessons.reduce((max, course) => {
+      const normalizedPrice = Number.isFinite(course.price) ? course.price : 0;
+      return Math.max(max, normalizedPrice);
+    }, 0);
+    return Math.max(10000, maxPriceFromLessons);
+  }, [lessons]);
 
   const isInitialLoad = useRef(true);
   const isFetchingRef = useRef(false);
@@ -554,9 +563,12 @@ const Browselessons = () => {
       filtered = filtered.filter(course => course.rating >= minRating);
     }
 
-    filtered = filtered.filter(course => 
-      course.price >= priceRange[0] && course.price <= priceRange[1]
-    );
+    // Only apply price filtering when the user explicitly changes the slider.
+    if (isPriceFilterActive) {
+      filtered = filtered.filter(course =>
+        course.price >= priceRange[0] && course.price <= priceRange[1]
+      );
+    }
 
     // Apply sorting
     filtered.sort((a, b) => {
@@ -578,7 +590,7 @@ const Browselessons = () => {
     });
 
     setFilteredlessons(filtered);
-  }, [lessons, showOnlyPurchased, showFreeOnly, searchQuery, selectedTopic, selectedGrade, selectedSubject, selectedTerm, sortBy, selectedDifficulties, minRating, priceRange, selectedCategory]);
+  }, [lessons, showOnlyPurchased, showFreeOnly, searchQuery, selectedTopic, selectedGrade, selectedSubject, selectedTerm, sortBy, selectedDifficulties, minRating, priceRange, selectedCategory, isPriceFilterActive]);
 
   const updateAvailableSubjects = useCallback(() => {
     // Filter lessons by selected grade first, then extract unique subjects
@@ -615,28 +627,42 @@ const Browselessons = () => {
     // so no need to re-apply cache here. Just fetch fresh data from the API.
     
     try {
-      const [studentData, progress, enrollmentsData] = await Promise.all([
+      const [studentResult, progressResult, enrollmentsResult] = await Promise.allSettled([
         getStudentByUserId(user.id),
         getUserProgress(user.id),
         getEnrollments()
       ]);
-      
+
+      const studentData = studentResult.status === 'fulfilled' ? studentResult.value : null;
+      const progress = progressResult.status === 'fulfilled' ? progressResult.value : [];
+      const enrollmentsData = enrollmentsResult.status === 'fulfilled' ? enrollmentsResult.value : [];
+
+      if (studentResult.status !== 'fulfilled') {
+        console.warn('Warning: Failed to load student profile.', studentResult.reason);
+      }
+      if (progressResult.status !== 'fulfilled') {
+        console.warn('Warning: Failed to load user progress.', progressResult.reason);
+      }
+      if (enrollmentsResult.status !== 'fulfilled') {
+        console.warn('Warning: Failed to load enrollments.', enrollmentsResult.reason);
+      }
+
       // Cache enrollments to localStorage for faster subsequent loads
       localStorage.setItem('user_enrollments', JSON.stringify(enrollmentsData));
-      // Keep enrollmentsRef in sync immediately so any in-flight fetchlessonsForGrade
-      // calls pick up the real data before they call setlessons.
       enrollmentsRef.current = enrollmentsData;
 
-      setStudentGrade(studentData.grade);
-      setUserProgress(progress);
-      setEnrollments(enrollmentsData);
+      if (studentData?.grade) {
+        setStudentGrade(studentData.grade);
+      }
+      setUserProgress(progress || []);
+      setEnrollments(enrollmentsData || []);
 
       // Re-stamp any lessons already in state with the fresh enrollments
       setlessons(prevlessons => {
         if (prevlessons.length === 0) return prevlessons;
         return prevlessons.map(course => ({
           ...course,
-          enrolled: enrollmentsData.some(e => isEnrolledUtil(e, course.subject, course.grade, course.term, course.lessonId)),
+          enrolled: (enrollmentsData || []).some(e => isEnrolledUtil(e, course.subject, course.grade, course.term, course.lessonId)),
         }));
       });
       
@@ -739,9 +765,8 @@ const Browselessons = () => {
   }, [enrollments]); // lessons no longer needed as dep since we use functional update
 
   useEffect(() => {
-    // Load ALL grades on initial load only after enrollments have been fetched
-    // Wait for enrollments to be loaded (even if empty array)
-    if (enrollments !== null && loadedGradesRef.current.size === 0 && !isFetchingRef.current) {
+    // Load ALL grades on initial load only after auth is resolved and enrollments have been fetched
+    if (!authLoading && user?.id && enrollments !== null && loadedGradesRef.current.size === 0 && !isFetchingRef.current) {
       const loadAllGrades = async () => {
         // Load enrolled grades first so "My Purchased" tab is accurate immediately
         const enrolledGrades = [...new Set(enrollments.map(e => String(e.grade)))];
@@ -756,7 +781,7 @@ const Browselessons = () => {
       };
       loadAllGrades();
     }
-  }, [enrollments]);
+  }, [authLoading, user?.id, enrollments]);
 
   // Separate effect for fetching lessons when grade changes
   useEffect(() => {
@@ -806,6 +831,15 @@ const Browselessons = () => {
   useEffect(() => {
     updateAvailableSubjects();
   }, [updateAvailableSubjects]);
+
+  useEffect(() => {
+    // Keep the default price range aligned with available data without enabling filtering.
+    if (!isPriceFilterActive) {
+      setPriceRange([0, maxPriceLimit]);
+    } else {
+      setPriceRange(([min, max]) => [min, Math.min(max, maxPriceLimit)]);
+    }
+  }, [maxPriceLimit, isPriceFilterActive]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -911,89 +945,150 @@ const Browselessons = () => {
         }
       }
 
-      // Fetch all subjects for all terms in parallel
-      const subjectsPromises = terms.map(term => 
-        getSubjectsByGrade(gradeValue, term.name)
-          .then(subjects => ({ term: term.name, subjects }))
-          .catch(err => {
-            console.error(`Error fetching subjects for ${gradeValue} ${term.name}:`, err);
-            return { term: term.name, subjects: [] };
-          })
-      );
+      let termSubjects = [] as Array<{ term: string; subjects: any[] }>;
+      let fallbackLessons: Lesson[] = [];
+      let fallbackQuizCounts: Record<string, number> = {};
 
-      const termSubjects = await Promise.all(subjectsPromises);
-
-      // Fetch lessons AND quiz counts for all subject-term combinations in parallel
-      const lessonPromises = termSubjects.flatMap(({ term, subjects }) =>
-        subjects.map(subject =>
-          Promise.all([
-            getLessonsBySubjectAndGrade(subject.name, gradeValue, term),
-            getQuizzesByFilters(subject.name, gradeValue, term)
-          ])
-            .then(([lessons, quizzes]) => ({ subject, term, lessons, quizzes, gradeValue }))
-            .catch(err => {
-              console.error(`Error fetching data for ${subject.name}:`, err);
-              return { subject, term, lessons: [], quizzes: [], gradeValue };
-            })
-        )
-      );
-
-      const allLessons = await Promise.all(lessonPromises);
-
-      // Process all results — push one card per individual lesson so each lesson is separately browseable
-      allLessons.forEach(({ subject, term, lessons, quizzes, gradeValue }) => {
-        if (lessons.length > 0) {
-          subjectsSet.add(subject.name);
-          
-          const validDifficulty = subject.difficulty && 
-            ['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard', 'Beginner', 'Intermediate', 'Advanced'].includes(subject.difficulty)
-            ? subject.difficulty as 'beginner' | 'intermediate' | 'advanced' | 'easy' | 'medium' | 'hard' | 'Beginner' | 'Intermediate' | 'Advanced'
-            : 'beginner' as const;
-
-          // Push one card per individual lesson so each lesson appears as a separate entry
-          lessons.forEach(lesson => {
-            // Per-lesson enrollment count takes priority; fall back to subject-level count
-            const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
-            const subjectEnrollCount = enrollmentCountsRef.current[`${subject.name}|${gradeValue}|${term}`] || 0;
-            const studentCount = lessonEnrollCount || subjectEnrollCount;
-            // Check enrollment per lesson — only mark enrolled if there's a matching enrollment
-            // for this specific lessonId (new) OR a subject-level enrollment (legacy/backward compat)
-            const enrolled = enrollmentsRef.current.some(e =>
-              isEnrolledUtil(e, subject.name, gradeValue, term, lesson.id)
-            );
-
-            const lessonDuration = lesson.duration || 30;
-            const durationDisplay = lessonDuration >= 60
-              ? `${Math.ceil(lessonDuration / 60)}h`
-              : `${lessonDuration}m`;
-            const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
-
-            newlessons.push({
-              id: lesson.id,
-              subject: subject.name,
-              grade: grade,
-              term: term,
-              lessonTitle: lesson.title,
-              lessonId: lesson.id,
-              lessonCount: 1,
-              quizCount: quizzes.some(q => q.lessonId === lesson.id) ? 1 : 0,
-              description: lesson.description?.trim() || '',
-              difficulty: validDifficulty,
-              estimatedHours: Math.ceil(lessonDuration / 60),
-              durationDisplay,
-              completionRate: lessonCompleted ? 100 : 0,
-              enrolled,
-              price: subject.price || 0,
-              rating: subject.rating || 0,
-              studentCount,
-              imageUrl: lesson.imageUrl || undefined,
-              topics: [lesson.title],
-              lessonIds: [lesson.id],
-              reviewCount: 0,
-            });
-          });
+      if (!terms.length) {
+        try {
+          fallbackLessons = await getLessons(undefined, gradeValue);
+          if (fallbackLessons.length > 0) {
+            const gradeQuizzes = await getQuizzesByFilters(undefined, gradeValue);
+            fallbackQuizCounts = gradeQuizzes.reduce((acc, quiz) => {
+              if (quiz.lessonId) {
+                acc[quiz.lessonId] = (acc[quiz.lessonId] || 0) + 1;
+              }
+              return acc;
+            }, {} as Record<string, number>);
+          }
+        } catch (err) {
+          console.error(`[Browselessons] Fallback fetch failed for grade ${gradeValue}:`, err);
         }
-      });
+      } else {
+        termSubjects = await Promise.all(
+          terms.map(term => 
+            getSubjectsByGrade(gradeValue, term.name)
+              .then(subjects => ({ term: term.name, subjects }))
+              .catch(err => {
+                console.error(`Error fetching subjects for ${gradeValue} ${term.name}:`, err);
+                return { term: term.name, subjects: [] };
+              })
+          )
+        );
+      }
+
+      const allLessons = fallbackLessons.length > 0
+        ? [{ term: 'All Terms', subjects: [{ name: '', difficulty: 'beginner', price: 0, rating: 0, ratingsCount: 0, enrolledStudents: 0 }], lessons: fallbackLessons, quizzes: [], gradeValue }]
+        : await Promise.all(termSubjects.flatMap(({ term, subjects }) =>
+            subjects.map(subject =>
+              Promise.all([
+                getLessonsBySubjectAndGrade(subject.name, gradeValue, term),
+                getQuizzesByFilters(subject.name, gradeValue, term)
+              ])
+                .then(([lessons, quizzes]) => ({ subject, term, lessons, quizzes, gradeValue }))
+                .catch(err => {
+                  console.error(`Error fetching data for ${subject.name}:`, err);
+                  return { subject, term, lessons: [], quizzes: [], gradeValue };
+                })
+            )
+          ));
+
+      if (fallbackLessons.length > 0) {
+        fallbackLessons.forEach(lesson => {
+          subjectsSet.add(lesson.subject);
+          const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
+          const subjectEnrollCount = enrollmentCountsRef.current[`${lesson.subject}|${gradeValue}|${lesson.term}`] || 0;
+          const studentCount = lessonEnrollCount || subjectEnrollCount;
+          const enrolled = enrollmentsRef.current.some(e =>
+            isEnrolledUtil(e, lesson.subject, gradeValue, lesson.term, lesson.id)
+          );
+
+          const lessonDuration = lesson.duration || 30;
+          const durationDisplay = lessonDuration >= 60
+            ? `${Math.ceil(lessonDuration / 60)}h`
+            : `${lessonDuration}m`;
+          const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
+
+          newlessons.push({
+            id: lesson.id,
+            subject: lesson.subject,
+            grade: grade,
+            term: lesson.term,
+            lessonTitle: lesson.title,
+            lessonId: lesson.id,
+            lessonCount: 1,
+            quizCount: fallbackQuizCounts[lesson.id] || 0,
+            description: lesson.description?.trim() || '',
+            difficulty: lesson.difficulty as Course['difficulty'] || 'beginner',
+            estimatedHours: Math.ceil(lessonDuration / 60),
+            durationDisplay,
+            completionRate: lessonCompleted ? 100 : 0,
+            enrolled,
+            price: lesson.price ?? 0,
+            rating: lesson.rating ?? 0,
+            studentCount,
+            imageUrl: lesson.imageUrl || undefined,
+            topics: [lesson.title],
+            lessonIds: [lesson.id],
+            reviewCount: 0,
+          });
+        });
+      } else {
+        // Process all results — push one card per individual lesson so each lesson is separately browseable
+        allLessons.forEach(({ subject, term, lessons, quizzes, gradeValue }) => {
+          if (lessons.length > 0) {
+            subjectsSet.add(subject.name);
+            
+            const validDifficulty = subject.difficulty && 
+              ['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard', 'Beginner', 'Intermediate', 'Advanced'].includes(subject.difficulty)
+              ? subject.difficulty as 'beginner' | 'intermediate' | 'advanced' | 'easy' | 'medium' | 'hard' | 'Beginner' | 'Intermediate' | 'Advanced'
+              : 'beginner' as const;
+
+            // Push one card per individual lesson so each lesson appears as a separate entry
+            lessons.forEach(lesson => {
+              // Per-lesson enrollment count takes priority; fall back to subject-level count
+              const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
+              const subjectEnrollCount = enrollmentCountsRef.current[`${subject.name}|${gradeValue}|${term}`] || 0;
+              const studentCount = lessonEnrollCount || subjectEnrollCount;
+              // Check enrollment per lesson — only mark enrolled if there's a matching enrollment
+              // for this specific lessonId (new) OR a subject-level enrollment (legacy/backward compat)
+              const enrolled = enrollmentsRef.current.some(e =>
+                isEnrolledUtil(e, subject.name, gradeValue, term, lesson.id)
+              );
+
+              const lessonDuration = lesson.duration || 30;
+              const durationDisplay = lessonDuration >= 60
+                ? `${Math.ceil(lessonDuration / 60)}h`
+                : `${lessonDuration}m`;
+              const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
+
+              newlessons.push({
+                id: lesson.id,
+                subject: subject.name,
+                grade: grade,
+                term: term,
+                lessonTitle: lesson.title,
+                lessonId: lesson.id,
+                lessonCount: 1,
+                quizCount: quizzes.some(q => q.lessonId === lesson.id) ? 1 : 0,
+                description: lesson.description?.trim() || '',
+                difficulty: validDifficulty,
+                estimatedHours: Math.ceil(lessonDuration / 60),
+                durationDisplay,
+                completionRate: lessonCompleted ? 100 : 0,
+                enrolled,
+                price: subject.price || 0,
+                rating: subject.rating || 0,
+                studentCount,
+                imageUrl: lesson.imageUrl || undefined,
+                topics: [lesson.title],
+                lessonIds: [lesson.id],
+                reviewCount: 0,
+              });
+            });
+          }
+        });
+      }
 
       // Merge with existing subjects instead of replacing
       setAvailableSubjects(prev => {
@@ -1149,7 +1244,7 @@ const Browselessons = () => {
       // Otherwise fetch all lessons for the subject/grade/term.
       let lessons: Lesson[];
       if (course.lessonId) {
-        const single = await getLessonById(course.lessonId);
+        const single = await getLessonPreviewById(course.lessonId);
         lessons = single ? [single] : [];
       } else {
         lessons = await getLessonsBySubjectAndGrade(course.subject, course.grade, course.term);
@@ -1226,7 +1321,8 @@ const Browselessons = () => {
     setSortBy('popular');
     setSelectedDifficulties([]);
     setMinRating(0);
-    setPriceRange([0, 10000]);
+    setPriceRange([0, maxPriceLimit]);
+    setIsPriceFilterActive(false);
   };
 
   // Returns the enrolled course that was most recently accessed
@@ -1838,20 +1934,27 @@ const Browselessons = () => {
                     <div className="space-y-3">
                       <label className="text-sm font-semibold">
                         Price Range: {formatCurrency(priceRange[0])} - {formatCurrency(priceRange[1])}
+                        {!isPriceFilterActive && (
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">(not applied)</span>
+                        )}
                       </label>
                       <div className="space-y-2">
                         <input
                           type="range"
                           min="0"
-                          max="10000"
+                          max={maxPriceLimit}
                           step="500"
                           value={priceRange[1]}
-                          onChange={(e) => setPriceRange([0, Number(e.target.value)])}
+                          onChange={(e) => {
+                            const selectedMax = Number(e.target.value);
+                            setPriceRange([0, selectedMax]);
+                            setIsPriceFilterActive(selectedMax < maxPriceLimit);
+                          }}
                           className="w-full"
                         />
                         <div className="flex justify-between text-xs text-muted-foreground">
                           <span>₦0</span>
-                          <span>₦10,000</span>
+                          <span>{formatCurrency(maxPriceLimit)}</span>
                         </div>
                       </div>
                     </div>
@@ -1865,7 +1968,8 @@ const Browselessons = () => {
                       onClick={() => {
                         setSelectedDifficulties([]);
                         setMinRating(0);
-                        setPriceRange([0, 10000]);
+                        setPriceRange([0, maxPriceLimit]);
+                        setIsPriceFilterActive(false);
                       }}
                     >
                       <X className="w-4 h-4 mr-2" />

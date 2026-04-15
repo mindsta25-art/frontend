@@ -158,13 +158,35 @@ export const getDraftLessons = async (): Promise<Lesson[]> => {
 
 /**
  * Get lesson by ID
+ * Returns null if lesson not found or not enrolled (403)
  */
 export const getLessonById = async (id: string): Promise<Lesson | null> => {
   try {
     const result = await api.get(`/lessons/${id}`);
     return result;
-  } catch (error) {
+  } catch (error: any) {
+    // Handle 403 Forbidden (not enrolled)
+    if (error?.response?.status === 403) {
+      console.warn(`Access denied to lesson ${id}: Not enrolled`);
+      return null;
+    }
     console.error('Error fetching lesson:', error);
+    return null;
+  }
+};
+
+/**
+ * Get lesson preview metadata for cart/checkout and browse preview.
+ */
+export const getLessonPreviewById = async (id: string): Promise<Lesson | null> => {
+  try {
+    const result = await api.get(`/lessons/${id}/preview`);
+    return result;
+  } catch (error: any) {
+    if (error?.response?.status === 404) {
+      return null;
+    }
+    console.error(`Error fetching lesson preview ${id}:`, error);
     return null;
   }
 };

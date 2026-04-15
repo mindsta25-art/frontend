@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { BookOpen, Star, Users, Clock } from "lucide-react";
 import { getStudentByUserId, initializePayment } from "@/api";
-import { getLessonById, getSubjectsByGrade, type SubjectInfo } from "@/api/lessons";
+import { getLessonPreviewById, getSubjectsByGrade, type SubjectInfo } from "@/api/lessons";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/config/siteConfig";
 
@@ -76,7 +76,7 @@ const Checkout = () => {
           cart.items.map(async (item) => {
             try {
               if (item.lessonId) {
-                const lesson = await getLessonById(item.lessonId);
+                const lesson = await getLessonPreviewById(item.lessonId);
                 if (lesson) {
                   return {
                     ...item,

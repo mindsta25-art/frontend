@@ -14,11 +14,10 @@ import CurriculumDisplay from "@/components/CurriculumDisplay";
 import { ArrowLeft, BookOpen, Brain, CheckCircle, PlayCircle, FileText, List, Lock, ShoppingCart } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-import { getLessonById, type Lesson, type Section, type Lecture } from "@/api/lessons";
+import { getLessonById, getLessonPreviewById, type Lesson, type Section, type Lecture } from "@/api/lessons";
 import { getQuizByLessonId } from "@/api/quizzes";
 import { upsertProgress, getUserProgress } from "@/api/progress";
 import { getStudentByUserId } from "@/api/students";
-import { checkAccess } from "@/api/enrollments";
 import { recordStudyTime } from "@/api/gamification";
 
 interface LessonData {
@@ -166,8 +165,30 @@ const LessonDetail = () => {
           }
         }
 
-        // Fetch lesson
+        // Fetch lesson. If not enrolled, getLessonById returns null.
         const lessonData = await getLessonById(lessonId);
+        if (!lessonData) {
+          const previewData = await getLessonPreviewById(lessonId);
+          if (previewData) {
+            setLesson({
+              id: previewData.id,
+              title: previewData.title,
+              description: previewData.description,
+              content: previewData.content,
+              videoUrl: previewData.videoUrl,
+              term: (previewData as any).term,
+              curriculum: previewData.curriculum,
+              whatYouWillLearn: previewData.whatYouWillLearn,
+              requirements: previewData.requirements,
+              targetAudience: previewData.targetAudience,
+            });
+          }
+          setHasAccess(false);
+          setLoadingData(false);
+          setCheckingAccess(false);
+          return;
+        }
+
         setLesson({
           id: lessonData.id,
           title: lessonData.title,
@@ -181,16 +202,12 @@ const LessonDetail = () => {
           targetAudience: lessonData.targetAudience,
         });
 
-        // Check access after we have lesson data
-        const accessCheck = await checkAccess(
-          lessonData.subject, 
-          lessonData.grade, 
-          (lessonData as any).term
-        );
-        setHasAccess(accessCheck.hasAccess);
+        // We already have a secure lesson response from the backend,
+        // so treat this as authorized access.
+        setHasAccess(true);
 
         // Record lesson access so My Learning can track lessons in progress
-        if (user && lessonId && accessCheck.hasAccess) {
+        if (user && lessonId) {
           upsertProgress({
             userId: user.id,
             lessonId,

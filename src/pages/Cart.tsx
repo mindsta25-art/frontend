@@ -19,7 +19,7 @@ import {
   Users
 } from "lucide-react";
 import { getStudentByUserId } from "@/api";
-import { getLessonById, getSubjectsByGrade, type SubjectInfo } from "@/api/lessons";
+import { getLessonPreviewById, getSubjectsByGrade, type SubjectInfo } from "@/api/lessons";
 import { formatCurrency } from "@/config/siteConfig";
 
 interface EnrichedCartItem {
@@ -81,7 +81,7 @@ const Cart = () => {
           cart.items.map(async (item) => {
             try {
               if (item.lessonId) {
-                const lesson = await getLessonById(item.lessonId);
+                const lesson = await getLessonPreviewById(item.lessonId);
                 if (lesson) {
                   return {
                     ...item,
