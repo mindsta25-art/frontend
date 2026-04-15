@@ -767,33 +767,16 @@ const Browselessons = () => {
   }, [enrollments]); // lessons no longer needed as dep since we use functional update
 
   useEffect(() => {
-    // Load ALL grades on initial load only after auth is resolved and enrollments have been fetched
+    // Load ALL lessons at once (same approach as My Learning) once user + enrollments are ready
     if (!authLoading && user?.id && enrollments !== null && loadedGradesRef.current.size === 0 && !isFetchingRef.current) {
-      const loadAllGrades = async () => {
-        // Load enrolled grades first so "My Purchased" tab is accurate immediately
-        const enrolledGrades = [...new Set(enrollments.map(e => String(e.grade)))];
-        const orderedGrades = [
-          ...enrolledGrades.filter(g => grades.includes(g)),
-          ...grades.filter(g => !enrolledGrades.includes(g)),
-        ];
-        console.log('[Browselessons] Loading grades in priority order:', orderedGrades);
-        // Load first grade (student's enrolled grade) immediately for fast initial paint
-        if (orderedGrades.length > 0) {
-          await fetchlessonsForGrade(orderedGrades[0]);
-        }
-        // Load remaining grades 3 at a time for speed without flooding the server
-        for (let i = 1; i < orderedGrades.length; i += 3) {
-          await Promise.all(orderedGrades.slice(i, i + 3).map(g => fetchlessonsForGrade(g)));
-        }
-      };
-      loadAllGrades();
+      fetchAllLessonsAtOnce();
     } else if (!authLoading && !user?.id) {
-      // Auth resolved but no user logged in — stop spinner so the page renders
       setLoading(false);
     }
   }, [authLoading, user?.id, enrollments]);
 
-  // Separate effect for fetching lessons when grade changes
+  // Separate effect for fetching a single grade when user explicitly switches grade filter
+  // (only needed if lessons haven't loaded yet for some reason)
   useEffect(() => {
     if (selectedGrade !== 'all' && !loadedGrades.has(selectedGrade) && loadedGrades.size > 0) {
       fetchlessonsForGrade(selectedGrade);
@@ -926,6 +909,114 @@ const Browselessons = () => {
       setLoadingMore(false);
     }, 300);
   }, [loadingMore, hasMore]);
+
+  /**
+   * Fetch ALL lessons and ALL quizzes in 2 parallel requests — same approach as My Learning.
+   * This replaces the old per-grade waterfall (7 × 2 = 14 requests → 2 requests total).
+   */
+  const fetchAllLessonsAtOnce = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setLoading(true);
+
+    try {
+      // Fetch enrollment counts + all lessons + all quizzes in parallel
+      const [allLessons, allQuizzes] = await Promise.all([
+        getLessons().catch(err => {
+          console.error('[Browselessons] lessons fetch failed:', err);
+          return [] as Lesson[];
+        }),
+        getQuizzesByFilters().catch(() => [] as any[]),
+      ]);
+
+      // Fetch enrollment counts once
+      if (Object.keys(enrollmentCountsRef.current).length === 0) {
+        try {
+          const { api: _api } = await import('@/lib/apiClient');
+          const counts = await _api.get('/subjects/enrollment-counts');
+          if (counts && typeof counts === 'object') {
+            enrollmentCountsRef.current = counts;
+            setEnrollmentCounts(counts);
+          }
+        } catch (err) {
+          console.error('[Browselessons] Could not fetch enrollment counts:', err);
+        }
+      }
+
+      // Build quiz count map: lessonId → count
+      const quizCountMap: Record<string, number> = {};
+      for (const quiz of allQuizzes) {
+        if (quiz.lessonId) quizCountMap[quiz.lessonId] = (quizCountMap[quiz.lessonId] || 0) + 1;
+      }
+
+      const allCourses: Course[] = [];
+      const subjectsSet = new Set<string>();
+
+      for (const lesson of allLessons) {
+        subjectsSet.add(lesson.subject);
+
+        const gradeValue = lesson.grade;
+        const lessonEnrollCount = enrollmentCountsRef.current[`lesson|${lesson.id}`] || 0;
+        const subjectEnrollCount = enrollmentCountsRef.current[`${lesson.subject}|${gradeValue}|${lesson.term}`] || 0;
+        const studentCount = lessonEnrollCount || subjectEnrollCount;
+
+        const enrolled = enrollmentsRef.current.some(e =>
+          isEnrolledUtil(e, lesson.subject, gradeValue, lesson.term, lesson.id)
+        );
+
+        const lessonDuration = lesson.duration || 30;
+        const durationDisplay = lessonDuration >= 60
+          ? `${Math.ceil(lessonDuration / 60)}h`
+          : `${lessonDuration}m`;
+        const lessonCompleted = userProgress.some(p => p.lessonId === lesson.id && p.completed);
+
+        const validDifficulty = lesson.difficulty &&
+          ['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard', 'Beginner', 'Intermediate', 'Advanced'].includes(lesson.difficulty)
+          ? lesson.difficulty as Course['difficulty']
+          : 'beginner' as const;
+
+        allCourses.push({
+          id: lesson.id,
+          subject: lesson.subject,
+          grade: gradeValue,
+          term: lesson.term,
+          lessonTitle: lesson.title,
+          lessonId: lesson.id,
+          lessonCount: 1,
+          quizCount: quizCountMap[lesson.id] || 0,
+          description: lesson.description?.trim() || '',
+          difficulty: validDifficulty,
+          estimatedHours: Math.ceil(lessonDuration / 60),
+          durationDisplay,
+          completionRate: lessonCompleted ? 100 : 0,
+          enrolled,
+          price: lesson.price ?? 0,
+          rating: lesson.rating ?? 0,
+          studentCount,
+          imageUrl: lesson.imageUrl || undefined,
+          topics: [lesson.title],
+          lessonIds: [lesson.id],
+          reviewCount: 0,
+          createdAt: lesson.createdAt,
+        });
+      }
+
+      setAvailableSubjects(Array.from(subjectsSet).sort());
+
+      // Mark all grades as loaded
+      const allGrades = new Set(grades);
+      setLoadedGrades(allGrades);
+      loadedGradesRef.current = allGrades;
+
+      setlessons(allCourses);
+      isInitialLoad.current = false;
+    } catch (error) {
+      console.error('[Browselessons] Error fetching all lessons:', error);
+    } finally {
+      setLoading(false);
+      isFetchingRef.current = false;
+    }
+  };
 
   const fetchlessonsForGrade = async (grade: string) => {
     // Per-grade deduplication: skip if already loaded
@@ -1066,26 +1157,9 @@ const Browselessons = () => {
     }
   };
 
-  const loadRemainingGrades = async (excludeGrade: string) => {
-    setIsLoadingBackground(true);
-    // Use ref so we always see newly-loaded grades, not the stale closure value
-    const remainingGrades = grades.filter(g => g !== excludeGrade && !loadedGradesRef.current.has(g));
-    
-    // Load 3 at a time instead of sequentially
-    for (let i = 0; i < remainingGrades.length; i += 3) {
-      await Promise.all(remainingGrades.slice(i, i + 3).map(g => fetchlessonsForGrade(g)));
-    }
-    
-    setIsLoadingBackground(false);
-  };
-
   const fetchlessons = async () => {
-    // Legacy function - redirect to new implementation
-    if (studentGrade) {
-      await fetchlessonsForGrade(studentGrade);
-    } else {
-      await fetchlessonsForGrade(grades[0]);
-    }
+    // Legacy fallback — use the bulk loader
+    await fetchAllLessonsAtOnce();
   };
 
   const handleAddToCart = (course: Course) => {

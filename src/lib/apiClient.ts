@@ -48,6 +48,91 @@ export function clearApiCache(): void {
   inFlight.clear();
 }
 
+// ---------------------------------------------------------------------------
+// Silent token refresh — prevents auto-logout for active users (like Udemy)
+// ---------------------------------------------------------------------------
+
+/** True while a refresh request is in flight — prevents duplicate refresh calls */
+let _refreshing = false;
+/** Pending refresh promise shared across concurrent 401s */
+let _refreshPromise: Promise<boolean> | null = null;
+
+/**
+ * Decode the JWT exp claim (no library needed — just base-64 decode the payload).
+ * Returns the expiry timestamp in ms, or 0 on error.
+ */
+function _jwtExpiry(token: string): number {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return (payload.exp ?? 0) * 1000;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Call the /auth/refresh endpoint directly (bypasses apiRequest to avoid 401 loops).
+ * Updates localStorage on success. Returns true if a new token was stored.
+ */
+async function _doRefresh(): Promise<boolean> {
+  const token = localStorage.getItem('authToken');
+  if (!token) return false;
+  try {
+    const API_BASE = getApiBaseUrl();
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (!data?.token) return false;
+    // Persist the new token
+    localStorage.setItem('authToken', data.token);
+    try {
+      const stored = localStorage.getItem('currentUser');
+      if (stored) {
+        const user = JSON.parse(stored);
+        user.token = data.token;
+        localStorage.setItem('currentUser', JSON.stringify(user));
+      }
+    } catch { /* ignore */ }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Shared entry-point for silent refresh.
+ * Concurrent callers all await the same underlying Promise.
+ */
+function _refreshOnce(): Promise<boolean> {
+  if (_refreshing && _refreshPromise) return _refreshPromise;
+  _refreshing = true;
+  _refreshPromise = _doRefresh().finally(() => {
+    _refreshing = false;
+    _refreshPromise = null;
+  });
+  return _refreshPromise;
+}
+
+/**
+ * Proactively refresh the token on app start if it expires within 7 days.
+ * Call this once from AuthContext/App.tsx.
+ */
+export function scheduleTokenRefresh(): void {
+  const token = localStorage.getItem('authToken');
+  if (!token) return;
+  const expiry = _jwtExpiry(token);
+  if (!expiry) return;
+  const msUntilExpiry = expiry - Date.now();
+  // Refresh immediately if expiring within 7 days
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+  if (msUntilExpiry < SEVEN_DAYS && msUntilExpiry > 0) {
+    _refreshOnce();
+  }
+}
+
 /**
  * Bust cached entries that match a resource prefix.
  * Called automatically after every POST / PUT / PATCH / DELETE so the next
@@ -82,7 +167,7 @@ const error = console.error.bind(console); // always log real errors
 /**
  * Make an API request with timeout
  */
-async function apiRequest(endpoint: string, options: RequestInit = {}) {
+async function apiRequest(endpoint: string, options: RequestInit = {}, _isRetry = false) {
   const url = `${API_BASE_URL}${endpoint}`;
   
   log(`🌐 API Request: ${options.method || 'GET'} ${url}`);
@@ -144,10 +229,21 @@ async function apiRequest(endpoint: string, options: RequestInit = {}) {
         throw error;
       }
 
-      // Only clear token and redirect if on a protected page
-      log('🔄 Clearing expired token and redirecting to login');
+      // On protected pages: try a silent token refresh once before redirecting
+      if (!_isRetry) {
+        warn('🔄 Attempting silent token refresh...');
+        const refreshed = await _refreshOnce();
+        if (refreshed) {
+          // Retry the original request with the new token
+          return apiRequest(endpoint, options, true);
+        }
+      }
+
+      // Refresh failed — log out and redirect
+      log('🔄 Refresh failed, clearing token and redirecting to login');
       localStorage.removeItem('authToken');
       localStorage.removeItem('currentUser');
+      clearApiCache();
       
       // Small delay to avoid immediate redirect during page load
       setTimeout(() => {

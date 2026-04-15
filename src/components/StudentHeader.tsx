@@ -647,25 +647,35 @@ const StudentHeaderComponent = ({ studentName }: StudentHeaderProps) => {
             </div>
 
             {/* Mobile Search Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden hover:bg-purple-100 dark:hover:bg-purple-950/40"
-              onClick={() => { setMobileSearchOpen(v => !v); setSearchQuery(''); setShowSuggestions(false); }}
-              aria-label={mobileSearchOpen ? 'Close search' : 'Search'}
-            >
-              {mobileSearchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden hover:bg-purple-100 dark:hover:bg-purple-950/40"
+                  onClick={() => { setMobileSearchOpen(v => !v); setSearchQuery(''); setShowSuggestions(false); }}
+                  aria-label={mobileSearchOpen ? 'Close search' : 'Search'}
+                >
+                  {mobileSearchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{mobileSearchOpen ? 'Close search' : 'Search'}</TooltipContent>
+            </Tooltip>
             {/* Mobile Menu Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden hover:bg-purple-100 dark:hover:bg-purple-950/40"
-              onClick={() => { setMobileMenuOpen(true); setMobileSearchOpen(false); setSearchQuery(''); }}
-              aria-label="Open menu"
-            >
-              <Menu className="w-6 h-6" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden hover:bg-purple-100 dark:hover:bg-purple-950/40"
+                  onClick={() => { setMobileMenuOpen(true); setMobileSearchOpen(false); setSearchQuery(''); }}
+                  aria-label="Open menu"
+                >
+                  <Menu className="w-6 h-6" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Menu</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>

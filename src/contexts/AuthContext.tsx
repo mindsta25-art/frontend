@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useMemo, useCallback } from "react";
 import { getCurrentUser, type AuthUser } from "@/api/auth";
+import { scheduleTokenRefresh } from "@/lib/apiClient";
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -37,6 +38,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const currentUser = getCurrentUser();
     setUser(currentUser);
     setLoading(false);
+
+    // Proactively refresh token if it expires within 7 days (keeps users logged in like Udemy)
+    if (currentUser) scheduleTokenRefresh();
 
     // Listen for storage changes (multi-tab support)
     const handleStorageChange = (e: StorageEvent) => {
