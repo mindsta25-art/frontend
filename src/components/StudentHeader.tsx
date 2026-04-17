@@ -65,7 +65,7 @@ import {
 } from "lucide-react";
 import { signOut } from "@/api";
 import { getStudentByUserId, updateStudentGrade } from "@/api";
-import { getAllLessons, type Lesson } from "@/api/lessons";
+import { searchLessons, type Lesson } from "@/api/lessons";
 import { formatCurrency } from "@/config/siteConfig";
 import {
   AlertDialog,
@@ -94,7 +94,6 @@ const StudentHeaderComponent = ({ studentName }: StudentHeaderProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchSuggestions, setSearchSuggestions] = useState<Lesson[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [allLessons, setAllLessons] = useState<Lesson[]>([]);
   const [wishBump, setWishBump] = useState(false);
   const [cartBump, setCartBump] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -192,42 +191,25 @@ const StudentHeaderComponent = ({ studentName }: StudentHeaderProps) => {
     setShowSuggestions(false);
   };
 
-  // Fetch all lessons once for search suggestions - deferred to not block initial render
+  // Fetch search suggestions from server when user types (debounced — no preload on mount)
   useEffect(() => {
-    // Defer loading lessons until after initial render
-    const fetchLessons = async () => {
-      try {
-        const lessons = await getAllLessons();
-        setAllLessons(lessons || []);
-      } catch (error) {
-        console.error('Error fetching lessons for search:', error);
-      }
-    };
-    
-    // Delay fetching to prioritize page load
-    const timer = setTimeout(fetchLessons, 500);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Update search suggestions as user types
-  useEffect(() => {
-    if (searchQuery.trim() && allLessons.length > 0) {
-      const query = searchQuery.toLowerCase();
-      const filtered = allLessons
-        .filter(lesson => 
-          lesson.title?.toLowerCase().includes(query) ||
-          lesson.description?.toLowerCase().includes(query) ||
-          lesson.subject?.toLowerCase().includes(query)
-        )
-        .slice(0, 5); // Show max 5 suggestions
-      
-      setSearchSuggestions(filtered);
-      setShowSuggestions(filtered.length > 0);
-    } else {
+    if (!searchQuery.trim()) {
       setSearchSuggestions([]);
       setShowSuggestions(false);
+      return;
     }
-  }, [searchQuery, allLessons]);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchLessons(searchQuery.trim(), undefined, undefined, 5);
+        setSearchSuggestions(results || []);
+        setShowSuggestions((results || []).length > 0);
+      } catch {
+        setSearchSuggestions([]);
+        setShowSuggestions(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -514,12 +496,28 @@ const StudentHeaderComponent = ({ studentName }: StudentHeaderProps) => {
                       </div>
                     ) : (
                       <div className="divide-y">
-                        {cart.items.map((item) => (
+                        {cart.items.map((item) => {
+                          const _imgKey = item.lessonId
+                            ? `cart_img_lesson:${item.lessonId}`
+                            : `cart_img_subj:${encodeURIComponent(item.subject)}:${item.grade}:${encodeURIComponent(item.term || '')}`;
+                          const _imgUrl = (() => { try { return localStorage.getItem(_imgKey) || ''; } catch { return ''; } })();
+                          return (
                           <div key={item._id} className="p-3 sm:p-4 hover:bg-muted/50 transition-colors group">
                             <div className="flex gap-2 sm:gap-3">
                               {/* Thumbnail */}
-                              <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-indigo-400 to-pink-400 rounded flex-shrink-0 flex items-center justify-center">
-                                <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                              <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-indigo-400 to-pink-400 rounded flex-shrink-0 overflow-hidden relative">
+                                {_imgUrl ? (
+                                  <img
+                                    src={_imgUrl}
+                                    alt={item.subject}
+                                    className="absolute inset-0 w-full h-full object-cover"
+                                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                                  </div>
+                                )}
                               </div>
                               
                               {/* Content */}
@@ -546,7 +544,8 @@ const StudentHeaderComponent = ({ studentName }: StudentHeaderProps) => {
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

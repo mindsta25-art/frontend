@@ -112,14 +112,32 @@ export const getSubjectsByGrade = async (grade: string, term?: string): Promise<
 };
 
 /**
+ * Lightweight server-side search — used by the header search box and search page.
+ */
+export const searchLessons = async (q: string, grade?: string, subject?: string, limit = 20): Promise<Lesson[]> => {
+  try {
+    const params = new URLSearchParams();
+    if (q.trim()) params.append('q', q.trim());
+    if (grade) params.append('grade', grade);
+    if (subject) params.append('subject', subject);
+    params.append('limit', String(limit));
+    const result = await api.get(`/lessons/search?${params.toString()}`);
+    return result;
+  } catch (error) {
+    return [];
+  }
+};
+
+/**
  * Get all lessons
  */
-export const getLessons = async (subject?: string, grade?: string, term?: string): Promise<Lesson[]> => {
+export const getLessons = async (subject?: string, grade?: string, term?: string, enrolledOnly?: boolean): Promise<Lesson[]> => {
   try {
     const params = new URLSearchParams();
     if (subject) params.append('subject', subject);
     if (grade) params.append('grade', grade);
     if (term) params.append('term', term);
+    if (enrolledOnly) params.append('enrolledOnly', 'true');
     
     const result = await api.get(`/lessons?${params.toString()}`);
     return result;

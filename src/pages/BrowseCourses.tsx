@@ -1181,6 +1181,16 @@ const Browselessons = () => {
       lessonId: course.lessonId, // pass the specific lesson ID for per-lesson enrollment
       title: course.lessonTitle || course.subject,
     });
+
+    // Cache thumbnail so the cart dialog (StudentHeader hover card) can show the real image
+    const imgUrl = course.imageUrl || course.thumbnail || '';
+    if (imgUrl) {
+      const imgKey = course.lessonId
+        ? `cart_img_lesson:${course.lessonId}`
+        : `cart_img_subj:${encodeURIComponent(course.subject)}:${course.grade}:${encodeURIComponent(course.term || '')}`;
+      try { localStorage.setItem(imgKey, imgUrl); } catch { /* storage full – ignore */ }
+    }
+
     toast({
       title: "Added to cart",
       description: `${course.subject} has been added to your cart.`
@@ -2502,8 +2512,9 @@ const Browselessons = () => {
                     )}
                     {/* Center icon fallback */}
                     {!(course.imageUrl || course.thumbnail) && (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <BookOpen className="w-8 h-8 text-white/80" />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+                        <span className="text-2xl font-extrabold text-white/90 leading-none">{course.subject.charAt(0).toUpperCase()}</span>
+                        <span className="text-[9px] font-semibold text-white/60 uppercase tracking-wide">{course.grade === 'Common Entrance' ? 'CE' : `Gr ${course.grade}`}</span>
                       </div>
                     )}
                     {/* Status badge */}
@@ -2694,10 +2705,11 @@ const Browselessons = () => {
                     )}
                     
                     {!(course.imageUrl || course.thumbnail) && (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center transform group-hover:scale-110 transition-transform duration-300">
-                          <BookOpen className="w-10 h-10 text-white" />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                        <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center transform group-hover:scale-110 transition-transform duration-300 shadow-inner">
+                          <span className="text-4xl font-extrabold text-white leading-none">{course.subject.charAt(0).toUpperCase()}</span>
                         </div>
+                        <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">{course.grade === 'Common Entrance' ? 'Common Entrance' : `Grade ${course.grade}`}</span>
                       </div>
                     )}
                     
@@ -2883,138 +2895,9 @@ const Browselessons = () => {
           </motion.div>
         )}
 
-        {/* Load More Button — Udemy-style infinite scroll */}
-        {!loading && !searchQuery.trim() && hasMore && (
-          <div className="flex justify-center pt-6 pb-8">
-            <Button
-              onClick={loadMoreLessons}
-              disabled={loadingMore}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold px-8 py-3 rounded-full shadow-lg hover:shadow-xl transition-all duration-300"
-            >
-              {loadingMore ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                  Loading more lessons...
-                </>
-              ) : (
-                <>
-                  Load More Lessons
-                  <svg className="w-4 h-4 ml-2" viewBox="0 0 16 16" fill="none">
-                    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </>
-              )}
-            </Button>
-          </div>
-        )}
-
         {/* Invisible trigger for auto-loading */}
         {!loading && !searchQuery.trim() && hasMore && (
           <div ref={loadMoreRef} className="h-10" />
-        )}
-
-        {/* Pagination Controls — hidden while search is active */}
-        {!loading && !searchQuery.trim() && filteredlessons.length > itemsPerPage && (
-          <div className="flex flex-col items-center gap-3 pt-6 pb-12 border-t border-purple-100 dark:border-purple-900/30">
-            <p className="text-xs sm:text-sm font-medium text-muted-foreground">
-              Showing {((currentPage - 1) * itemsPerPage) + 1}–{Math.min(currentPage * itemsPerPage, filteredlessons.length)} of {filteredlessons.length} lessons
-            </p>
-            <div className="flex items-center gap-1 sm:gap-2">
-              {/* First page — desktop only */}
-              {Math.ceil(filteredlessons.length / itemsPerPage) > 5 && (
-                <Button
-                  variant="outline" size="sm"
-                  className="hidden sm:flex w-9 h-9 p-0"
-                  onClick={() => { setCurrentPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                  disabled={currentPage === 1}
-                  aria-label="First page"
-                >
-                  «
-                </Button>
-              )}
-
-              {/* Prev */}
-              <Button
-                variant="outline" size="sm"
-                className="gap-1 h-9 px-2.5 sm:px-3"
-                onClick={() => { setCurrentPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                disabled={currentPage === 1}
-              >
-                <span className="sr-only sm:not-sr-only">Prev</span>
-                <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </Button>
-
-              {/* Page numbers */}
-              <div className="flex items-center gap-1">
-                {(() => {
-                  const totalPages = Math.ceil(filteredlessons.length / itemsPerPage);
-                  // On mobile: show at most 3 page buttons; on desktop up to 7
-                  // We'll render a responsive set and hide extras via CSS
-                  const pages: number[] = [];
-                  if (totalPages <= 5) {
-                    for (let i = 1; i <= totalPages; i++) pages.push(i);
-                  } else if (currentPage <= 3) {
-                    pages.push(1, 2, 3, -1, totalPages);
-                  } else if (currentPage >= totalPages - 2) {
-                    pages.push(1, -1, totalPages - 2, totalPages - 1, totalPages);
-                  } else {
-                    pages.push(1, -1, currentPage - 1, currentPage, currentPage + 1, -2, totalPages);
-                  }
-                  return pages.map((page, idx) => {
-                    if (page < 0) {
-                      return (
-                        <span key={`e-${idx}`} className="hidden sm:inline-flex w-9 h-9 items-center justify-center text-muted-foreground text-sm">…</span>
-                      );
-                    }
-                    const isCurrent = currentPage === page;
-                    // On mobile: only show current page ±1 and first/last
-                    const showOnMobile = Math.abs(page - currentPage) <= 1 || page === 1 || page === totalPages;
-                    return (
-                      <Button
-                        key={page}
-                        variant={isCurrent ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => { setCurrentPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                        className={`w-9 h-9 p-0 ${
-                          isCurrent
-                            ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white border-0 shadow-sm'
-                            : ''
-                        } ${!showOnMobile ? 'hidden sm:inline-flex' : ''}`}
-                        aria-label={`Page ${page}`}
-                        aria-current={isCurrent ? 'page' : undefined}
-                      >
-                        {page}
-                      </Button>
-                    );
-                  });
-                })()}
-              </div>
-
-              {/* Next */}
-              <Button
-                variant="outline" size="sm"
-                className="gap-1 h-9 px-2.5 sm:px-3"
-                onClick={() => { setCurrentPage(p => Math.min(Math.ceil(filteredlessons.length / itemsPerPage), p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                disabled={currentPage >= Math.ceil(filteredlessons.length / itemsPerPage)}
-              >
-                <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none"><path d="M6 12l4-4-4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                <span className="sr-only sm:not-sr-only">Next</span>
-              </Button>
-
-              {/* Last page — desktop only */}
-              {Math.ceil(filteredlessons.length / itemsPerPage) > 5 && (
-                <Button
-                  variant="outline" size="sm"
-                  className="hidden sm:flex w-9 h-9 p-0"
-                  onClick={() => { setCurrentPage(Math.ceil(filteredlessons.length / itemsPerPage)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                  disabled={currentPage >= Math.ceil(filteredlessons.length / itemsPerPage)}
-                  aria-label="Last page"
-                >
-                  »
-                </Button>
-              )}
-            </div>
-          </div>
         )}
 
         {/* Results Summary — shown only during search */}

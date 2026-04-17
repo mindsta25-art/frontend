@@ -35,7 +35,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
-import { getAllLessons, type Lesson } from '@/api/lessons';
+import { searchLessons, type Lesson } from '@/api/lessons';
 import { getEnrollments, type Enrollment } from '@/api/enrollments';
 import { isEnrolled as isEnrolledUtil } from '@/utils/enrollmentUtils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -77,58 +77,44 @@ export default function SearchResults() {
 
   const GRADES = ['1', '2', '3', '4', '5', '6', 'Common Entrance'];
 
-  // Fetch all lessons + enrollments
+  // Fetch matching lessons from the server (debounced) whenever query or filters change.
+  // Enrollments are fetched once on mount.
   useEffect(() => {
-    const fetchLessons = async () => {
+    if (user !== undefined) {
+      getEnrollments().then(e => setEnrollments(e ?? []));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const fetchResults = async () => {
       setLoading(true);
       try {
-        const [lessons, userEnrollments] = await Promise.allSettled([
-          getAllLessons(),
-          user ? getEnrollments() : Promise.resolve([]),
-        ]);
-        setAllLessons(lessons.status === 'fulfilled' ? lessons.value || [] : []);
-        setEnrollments(userEnrollments.status === 'fulfilled' ? userEnrollments.value : []);
+        const lessons = await searchLessons(
+          searchQuery,
+          selectedGrade !== 'all' ? selectedGrade : undefined,
+          selectedSubject !== 'all' ? selectedSubject : undefined,
+          200,
+        );
+        setAllLessons(lessons ?? []);
       } catch (error) {
         console.error('Error fetching lessons:', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchLessons();
-  }, [user]);
+    const timer = setTimeout(fetchResults, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedGrade, selectedSubject]);
 
-  // Filter lessons based on search query and filters
+  // Client-side difficulty filter only (text/grade/subject handled server-side)
   useEffect(() => {
-    let results = [...allLessons];
-
-    // Text search
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      results = results.filter(lesson => 
-        lesson.title?.toLowerCase().includes(query) ||
-        lesson.description?.toLowerCase().includes(query) ||
-        lesson.subject?.toLowerCase().includes(query)
-      );
+    if (selectedDifficulty === 'all') {
+      setFilteredLessons(allLessons);
+    } else {
+      setFilteredLessons(allLessons.filter(l => l.difficulty?.toLowerCase() === selectedDifficulty.toLowerCase()));
     }
-
-    // Grade filter
-    if (selectedGrade !== 'all') {
-      results = results.filter(lesson => lesson.grade === selectedGrade);
-    }
-
-    // Subject filter
-    if (selectedSubject !== 'all') {
-      results = results.filter(lesson => lesson.subject === selectedSubject);
-    }
-
-    // Difficulty filter
-    if (selectedDifficulty !== 'all') {
-      results = results.filter(lesson => lesson.difficulty?.toLowerCase() === selectedDifficulty.toLowerCase());
-    }
-
-    setFilteredLessons(results);
     setCurrentPage(1);
-  }, [searchQuery, allLessons, selectedGrade, selectedSubject, selectedDifficulty]);
+  }, [allLessons, selectedDifficulty]);
 
   // Update URL when search query changes
   const handleSearch = (e: React.FormEvent) => {

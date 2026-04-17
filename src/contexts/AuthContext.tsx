@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useMemo, useCallback } from "react";
 import { getCurrentUser, type AuthUser } from "@/api/auth";
-import { scheduleTokenRefresh } from "@/lib/apiClient";
+import { scheduleTokenRefresh, cancelTokenRefresh } from "@/lib/apiClient";
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -45,15 +45,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Listen for storage changes (multi-tab support)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'authToken' || e.key === 'currentUser') {
-        // Only refresh if the values actually changed
         if (e.newValue !== e.oldValue) {
           refreshUser();
+          // If token was removed in another tab, stop the scheduler
+          if (e.key === 'authToken' && !e.newValue) cancelTokenRefresh();
         }
       }
     };
 
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      cancelTokenRefresh();
+    };
   }, [refreshUser]);
 
   const value = useMemo(

@@ -705,8 +705,8 @@ const SubjectLessonsPage = () => {
             onClick={() => navigate('/browse')}
             className="gap-2 mb-6"
           >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Browse
+            {/* <ArrowLeft className="w-4 h-4" />
+            Back to Browse */}
           </Button>
           
           <Card className="max-w-2xl mx-auto">
@@ -726,7 +726,7 @@ const SubjectLessonsPage = () => {
               </div>
               <div className="flex gap-3 justify-center">
                 <Button onClick={() => navigate('/browse')} variant="outline">
-                  Browse lessonss
+                  Browse Courses
                 </Button>
                 <Button onClick={() => navigate('/cart')} className="gap-2">
                   <ShoppingCart className="w-4 h-4" />

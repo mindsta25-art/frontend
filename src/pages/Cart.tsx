@@ -35,6 +35,7 @@ interface EnrichedCartItem {
   duration?: number;
   lessonId?: string;
   lessonTitle?: string;
+  imageUrl?: string;
 }
 
 const Cart = () => {
@@ -94,6 +95,7 @@ const Cart = () => {
                     subject: lesson.subject,
                     grade: lesson.grade,
                     term: lesson.term,
+                    imageUrl: lesson.imageUrl || '',
                   } as EnrichedCartItem;
                 }
               }
@@ -195,9 +197,18 @@ const Cart = () => {
                       <div className="flex gap-3 sm:gap-4">
                         {/* Course Thumbnail */}
                         <div className="relative w-20 h-14 sm:w-28 sm:h-16 md:w-32 md:h-20 bg-gradient-to-br from-purple-500 via-purple-600 to-purple-700 rounded flex-shrink-0 overflow-hidden">
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <BookOpen className="w-8 h-8 text-white opacity-90" />
-                          </div>
+                          {item.imageUrl ? (
+                            <img
+                              src={item.imageUrl}
+                              alt={item.lessonTitle || item.subject}
+                              className="absolute inset-0 w-full h-full object-cover"
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          ) : (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <BookOpen className="w-8 h-8 text-white opacity-90" />
+                            </div>
+                          )}
                         </div>
 
                         {/* Course Info */}

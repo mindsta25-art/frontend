@@ -326,8 +326,8 @@ const LessonDetail = () => {
             onClick={() => navigate('/browse')}
             className="gap-2 mb-6"
           >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Browse
+            {/* <ArrowLeft className="w-4 h-4" />
+            Back to Browse */}
           </Button>
           
           <Card className="max-w-2xl mx-auto">

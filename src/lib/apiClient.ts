@@ -116,20 +116,47 @@ function _refreshOnce(): Promise<boolean> {
   return _refreshPromise;
 }
 
+/** Handle for the hourly refresh interval — stored so AuthContext can clear it on logout */
+let _refreshIntervalId: ReturnType<typeof setInterval> | null = null;
+
 /**
- * Proactively refresh the token on app start if it expires within 7 days.
- * Call this once from AuthContext/App.tsx.
+ * Proactively refresh the token on app start if it expires within 7 days,
+ * then schedules an hourly check so long-running sessions never expire mid-visit.
+ * Call this once from AuthContext/App.tsx when a user is confirmed authenticated.
  */
 export function scheduleTokenRefresh(): void {
-  const token = localStorage.getItem('authToken');
-  if (!token) return;
-  const expiry = _jwtExpiry(token);
-  if (!expiry) return;
-  const msUntilExpiry = expiry - Date.now();
-  // Refresh immediately if expiring within 7 days
-  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
-  if (msUntilExpiry < SEVEN_DAYS && msUntilExpiry > 0) {
-    _refreshOnce();
+  // Clear any prior interval to avoid duplicate timers (e.g. after re-login)
+  if (_refreshIntervalId !== null) {
+    clearInterval(_refreshIntervalId);
+    _refreshIntervalId = null;
+  }
+
+  const _tryRefreshIfNeeded = () => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    const expiry = _jwtExpiry(token);
+    if (!expiry) return;
+    const msUntilExpiry = expiry - Date.now();
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+    const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
+    // Refresh if expiring within 7 days OR recently expired (within 90-day grace window)
+    if (msUntilExpiry < SEVEN_DAYS && msUntilExpiry > -NINETY_DAYS) {
+      _refreshOnce();
+    }
+  };
+
+  // Immediate check on app load
+  _tryRefreshIfNeeded();
+
+  // Hourly repeating check so long-lived sessions stay refreshed
+  _refreshIntervalId = setInterval(_tryRefreshIfNeeded, 60 * 60 * 1000);
+}
+
+/** Stop the scheduled refresh — call on explicit logout */
+export function cancelTokenRefresh(): void {
+  if (_refreshIntervalId !== null) {
+    clearInterval(_refreshIntervalId);
+    _refreshIntervalId = null;
   }
 }
 

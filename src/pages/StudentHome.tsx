@@ -151,7 +151,7 @@ const StudentHome = () => {
           getStudentByUserId(user.id),
           getUserProgress(user.id),
           getEnrollments(),
-          getLessons(),
+          getLessons(undefined, undefined, undefined, true),
         ]);
 
         if (!studentData) {
@@ -750,27 +750,37 @@ const StudentHome = () => {
                 </CardHeader>
                 <CardContent className="pt-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-                    {Array.from(new Set(enrolledLessons.map(l => l.subject))).slice(0, 8).map((subject, idx) => {
-                      const subjectLessons = enrolledLessons.filter(l => l.subject === subject);
-                      const subjectProgress = progress.filter(p => 
+                    {Array.from(
+                      new Map(
+                        enrolledLessons.map(l => {
+                          const key = `${l.subject}|${l.grade}|${l.term || ''}`;
+                          return [key, { subject: l.subject, grade: l.grade, term: l.term }] as [string, { subject: string; grade: string; term?: string }];
+                        })
+                      ).values()
+                    ).slice(0, 8).map(({ subject, grade, term }, idx) => {
+                      const subjectLessons = enrolledLessons.filter(l =>
+                        l.subject === subject && l.grade === grade && (l.term || '') === (term || '')
+                      );
+                      const subjectProgress = progress.filter(p =>
                         subjectLessons.some(l => l.id === p.lessonId)
                       );
                       const completedInSubject = subjectProgress.filter(p => p.completed).length;
-                      const percentage = subjectLessons.length > 0 
-                        ? Math.round((completedInSubject / subjectLessons.length) * 100) 
+                      const percentage = subjectLessons.length > 0
+                        ? Math.round((completedInSubject / subjectLessons.length) * 100)
                         : 0;
                       
                       return (
                         <motion.div
-                          key={subject}
+                          key={`${subject}|${grade}|${term || ''}`}
                           initial={{ opacity: 0, scale: 0.9 }}
                           animate={{ opacity: 1, scale: 1 }}
                           transition={{ delay: 0.1 * idx }}
                           className="relative"
                         >
                           <Card className="hover:shadow-lg transition-all cursor-pointer group" onClick={() => {
-                            const lesson = subjectLessons[0];
-                            navigate(`/subjects/${lesson.grade}/${lesson.subject}${lesson.term ? `?term=${lesson.term}` : ''}`);
+                            const p = new URLSearchParams();
+                            if (term) p.set('term', term);
+                            navigate(`/subjects/${grade}/${encodeURIComponent(subject)}${p.toString() ? `?${p}` : ''}`);
                           }}>
                             <CardContent className="p-3 sm:p-4">
                               <div className="flex flex-col items-center text-center">
@@ -811,9 +821,12 @@ const StudentHome = () => {
                                     </text>
                                   </svg>
                                 </div>
-                                <h4 className="text-xs sm:text-sm font-semibold mb-1 line-clamp-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                <h4 className="text-xs sm:text-sm font-semibold mb-0.5 line-clamp-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                                   {subject}
                                 </h4>
+                                <p className="text-[10px] text-muted-foreground/70 mb-1">
+                                  Grade {grade}{term ? ` · ${term}` : ''}
+                                </p>
                                 <p className="text-xs text-muted-foreground">
                                   {completedInSubject}/{subjectLessons.length} complete
                                 </p>
@@ -913,7 +926,7 @@ const StudentHome = () => {
 
               {/* Continue Learning */}
               {recentlessons.length > 0 ? (
-                <Card className="mt-4 sm:mt-5 shadow-sm hover:shadow-md transition-shadow flex flex-col flex-1">
+                <Card className="mt-4 sm:mt-5 shadow-sm hover:shadow-md transition-shadow">
                   <CardHeader className="pb-3 border-b border-gray-100 dark:border-gray-700">
                     <div className="flex items-center justify-between">
                       <CardTitle className="flex items-center gap-2 text-base">
@@ -936,7 +949,7 @@ const StudentHome = () => {
                       </Button>
                     </div>
                   </CardHeader>
-                  <CardContent className="pt-4 flex-1">
+                  <CardContent className="pt-4">
                     <div className="space-y-3">
                       {recentlessons.map((course, idx) => {
                         const continueLessonId = course.nextLesson?.id ?? course.lessonId;
@@ -1038,7 +1051,7 @@ const StudentHome = () => {
                   </CardContent>
                 </Card>
               ) : (
-                <Card className="mt-4 sm:mt-5 shadow-sm flex flex-col flex-1">
+                <Card className="mt-4 sm:mt-5 shadow-sm">
                   <CardContent className="py-10 flex flex-col items-center text-center gap-3">
                     <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center">
                       <BookOpen className="w-6 h-6 text-indigo-500" />
