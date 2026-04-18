@@ -54,8 +54,12 @@ export function clearApiCache(): void {
 
 /** True while a refresh request is in flight — prevents duplicate refresh calls */
 let _refreshing = false;
-/** Pending refresh promise shared across concurrent 401s */
-let _refreshPromise: Promise<boolean> | null = null;
+/**
+ * Pending refresh promise shared across concurrent 401s.
+ * Resolves to: true = new token stored, false = server explicitly rejected (log out),
+ * null = network/server error (do NOT log out — may be transient).
+ */
+let _refreshPromise: Promise<boolean | null> | null = null;
 
 /**
  * Decode the JWT exp claim (no library needed — just base-64 decode the payload).
@@ -72,9 +76,12 @@ function _jwtExpiry(token: string): number {
 
 /**
  * Call the /auth/refresh endpoint directly (bypasses apiRequest to avoid 401 loops).
- * Updates localStorage on success. Returns true if a new token was stored.
+ * Returns:
+ *   true  — new token obtained and stored
+ *   false — server explicitly rejected the token (401/403); caller should log the user out
+ *   null  — network/server error; the token may still be valid; caller should NOT log out
  */
-async function _doRefresh(): Promise<boolean> {
+async function _doRefresh(): Promise<boolean | null> {
   const token = localStorage.getItem('authToken');
   if (!token) return false;
   try {
@@ -83,9 +90,12 @@ async function _doRefresh(): Promise<boolean> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return false;
+    // Server explicitly rejected the token — safe to log out
+    if (res.status === 401 || res.status === 403) return false;
+    // Any other non-OK status (500, 503, etc.) is a server/infra problem — don't log out
+    if (!res.ok) return null;
     const data = await res.json();
-    if (!data?.token) return false;
+    if (!data?.token) return null;
     // Persist the new token
     localStorage.setItem('authToken', data.token);
     try {
@@ -98,7 +108,8 @@ async function _doRefresh(): Promise<boolean> {
     } catch { /* ignore */ }
     return true;
   } catch {
-    return false;
+    // fetch() threw — network is unavailable; do NOT log the user out
+    return null;
   }
 }
 
@@ -106,7 +117,7 @@ async function _doRefresh(): Promise<boolean> {
  * Shared entry-point for silent refresh.
  * Concurrent callers all await the same underlying Promise.
  */
-function _refreshOnce(): Promise<boolean> {
+function _refreshOnce(): Promise<boolean | null> {
   if (_refreshing && _refreshPromise) return _refreshPromise;
   _refreshing = true;
   _refreshPromise = _doRefresh().finally(() => {
@@ -260,14 +271,22 @@ async function apiRequest(endpoint: string, options: RequestInit = {}, _isRetry 
       if (!_isRetry) {
         warn('🔄 Attempting silent token refresh...');
         const refreshed = await _refreshOnce();
-        if (refreshed) {
+        if (refreshed === true) {
           // Retry the original request with the new token
           return apiRequest(endpoint, options, true);
         }
+        if (refreshed === null) {
+          // Network / infra error — token may still be valid; surface a network error
+          // instead of logging the user out
+          warn('⚠️ Refresh request failed due to network error — keeping session alive');
+          const netErr: any = new Error('Network error — please check your connection and try again');
+          netErr.response = { status: 0, statusText: 'Network Error', data: { message: netErr.message } };
+          throw netErr;
+        }
       }
 
-      // Refresh failed — log out and redirect
-      log('🔄 Refresh failed, clearing token and redirecting to login');
+      // refreshed === false (or _isRetry): server explicitly rejected our token — log out
+      log('🔄 Token rejected by server, clearing session and redirecting to login');
       localStorage.removeItem('authToken');
       localStorage.removeItem('currentUser');
       clearApiCache();
@@ -276,6 +295,8 @@ async function apiRequest(endpoint: string, options: RequestInit = {}, _isRetry 
       setTimeout(() => {
         window.location.href = '/auth?mode=login&reason=session-expired';
       }, 100);
+      // Return here so the code below doesn't also try to parse the 401 response body
+      return undefined as any;
     }
     
     // Handle 304 Not Modified - return empty array or cached data
