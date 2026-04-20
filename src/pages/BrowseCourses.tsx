@@ -48,6 +48,7 @@ import {
   Flame,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
   MoreVertical,
   Package,
   BarChart3,
@@ -128,7 +129,6 @@ const Browselessons = () => {
 
   const [lessons, setlessons] = useState<Course[]>([]);
   const [filteredlessons, setFilteredlessons] = useState<Course[]>([]);
-  const [displayedlessons, setDisplayedlessons] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedGrade, setSelectedGrade] = useState(searchParams.get('grade') || 'all');
@@ -837,17 +837,6 @@ const Browselessons = () => {
     setCurrentPage(1);
   }, [filteredlessons]);
 
-  // Update displayed lessons when page or filtered lessons change
-  // When a search query is active, show ALL results on one page (no pagination)
-  useEffect(() => {
-    if (searchQuery.trim()) {
-      setDisplayedlessons(filteredlessons);
-    } else {
-      const startIndex = (currentPage - 1) * itemsPerPage;
-      const endIndex = startIndex + itemsPerPage;
-      setDisplayedlessons(filteredlessons.slice(startIndex, endIndex));
-    }
-  }, [currentPage, filteredlessons, itemsPerPage, searchQuery]);
 
   // Ctrl+K / Cmd+K keyboard shortcut to focus search
   useEffect(() => {
@@ -1373,6 +1362,14 @@ const Browselessons = () => {
         return 'bg-muted text-muted-foreground';
     }
   };
+
+  // Pagination — computed directly like LessonManagement
+  const totalPages = Math.ceil(filteredlessons.length / itemsPerPage);
+  const pageStartIndex = (currentPage - 1) * itemsPerPage;
+  const pageEndIndex = pageStartIndex + itemsPerPage;
+  const paginatedLessons = searchQuery.trim()
+    ? filteredlessons
+    : filteredlessons.slice(pageStartIndex, pageEndIndex);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 dark:from-gray-950 dark:via-purple-950/20 dark:to-gray-950">
@@ -2441,7 +2438,7 @@ const Browselessons = () => {
             animate="visible"
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-8 mb-10"
           >
-            {displayedlessons.map((course) => (
+            {paginatedLessons.map((course) => (
               <motion.div
                 key={course.id}
                 variants={fadeInUp}
@@ -2860,48 +2857,37 @@ const Browselessons = () => {
           </motion.div>
         )}
 
-        {/* Pagination controls */}
-        {!loading && !searchQuery.trim() && filteredlessons.length > itemsPerPage && (
-          <div className="flex items-center justify-center gap-2 py-8">
-            <button
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="px-4 py-2 rounded-lg border text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-            >
-              Previous
-            </button>
-            {Array.from({ length: Math.ceil(filteredlessons.length / itemsPerPage) }, (_, i) => i + 1)
-              .filter(page => page === 1 || page === Math.ceil(filteredlessons.length / itemsPerPage) || Math.abs(page - currentPage) <= 2)
-              .reduce<(number | '...')[]>((acc, page, idx, arr) => {
-                if (idx > 0 && (page as number) - (arr[idx - 1] as number) > 1) acc.push('...');
-                acc.push(page);
-                return acc;
-              }, [])
-              .map((page, idx) =>
-                page === '...' ? (
-                  <span key={`ellipsis-${idx}`} className="px-2 text-muted-foreground">…</span>
-                ) : (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page as number)}
-                    className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                      currentPage === page
-                        ? 'bg-purple-600 text-white border-purple-600'
-                        : 'hover:bg-muted'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                )
-              )}
-            <button
-              onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredlessons.length / itemsPerPage), p + 1))}
-              disabled={currentPage === Math.ceil(filteredlessons.length / itemsPerPage)}
-              className="px-4 py-2 rounded-lg border text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted transition-colors"
-            >
-              Next
-            </button>
-          </div>
+        {/* Pagination — same pattern as LessonManagement */}
+        {!loading && !searchQuery.trim() && filteredlessons.length > 0 && (
+          <Card className="mt-4">
+            <CardContent className="pt-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">
+                  Showing {filteredlessons.length === 0 ? 0 : pageStartIndex + 1} to {Math.min(pageEndIndex, filteredlessons.length)} of {filteredlessons.length} lessons
+                </span>
+                <div className="flex items-center gap-2">
+                  <Select value={itemsPerPage.toString()} onValueChange={(v) => { setItemsPerPage(Number(v)); setCurrentPage(1); }}>
+                    <SelectTrigger className="w-[110px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="6">6 / page</SelectItem>
+                      <SelectItem value="12">12 / page</SelectItem>
+                      <SelectItem value="24">24 / page</SelectItem>
+                      <SelectItem value="48">48 / page</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <span className="text-sm font-medium whitespace-nowrap">Page {currentPage} of {totalPages}</span>
+                  <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Results Summary — shown only during search */}

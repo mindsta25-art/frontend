@@ -554,7 +554,6 @@ const CreateLesson = () => {
                       videoUrl={form.videoUrl}
                       title={form.title || "Lesson Preview"}
                       enableDownload={false}
-                      onDurationDetected={undefined}
                     />
                   </div>
                 )}
