@@ -199,8 +199,6 @@ const Browselessons = () => {
   // Pagination state
   const [itemsPerPage, setItemsPerPage] = useState(12);
   const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
 
   // Enrollment counts per subject-grade-term (for student count display)
   const [enrollmentCounts, setEnrollmentCounts] = useState<Record<string, number>>({});
@@ -847,8 +845,7 @@ const Browselessons = () => {
     } else {
       const startIndex = (currentPage - 1) * itemsPerPage;
       const endIndex = startIndex + itemsPerPage;
-      setDisplayedlessons(filteredlessons.slice(0, endIndex));
-      setHasMore(endIndex < filteredlessons.length);
+      setDisplayedlessons(filteredlessons.slice(startIndex, endIndex));
     }
   }, [currentPage, filteredlessons, itemsPerPage, searchQuery]);
 
@@ -877,36 +874,6 @@ const Browselessons = () => {
     setSearchParams(params);
   }, [searchQuery, selectedGrade, selectedSubject, selectedTerm, selectedTopic, selectedCategory, setSearchParams]);
 
-  // Intersection Observer for auto-loading more lessons
-  const loadMoreRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !searchQuery.trim()) {
-          loadMoreLessons();
-        }
-      },
-      { threshold: 0.15, rootMargin: '100px' }
-    );
-
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, [hasMore, loadingMore, searchQuery]);
-
-  const loadMoreLessons = useCallback(() => {
-    if (loadingMore || !hasMore) return;
-
-    setLoadingMore(true);
-    // Simulate loading delay for better UX
-    setTimeout(() => {
-      setCurrentPage(prev => prev + 1);
-      setLoadingMore(false);
-    }, 300);
-  }, [loadingMore, hasMore]);
 
   /**
    * Fetch ALL lessons and ALL quizzes in 2 parallel requests — same approach as My Learning.
@@ -2141,8 +2108,8 @@ const Browselessons = () => {
                   </h2>
                   <p className="text-sm text-muted-foreground">
                     {enrollments.length} enrolled • {filteredlessons.filter(c => !c.enrolled).length} available
-                    {displayedlessons.length < filteredlessons.length && (
-                      <> • Showing {displayedlessons.length} of {filteredlessons.length}</>
+                    {!searchQuery.trim() && filteredlessons.length > itemsPerPage && (
+                      <> • Page {currentPage} of {Math.ceil(filteredlessons.length / itemsPerPage)}</>
                     )}
                     {isLoadingBackground && (
                       <> • Loading more grades...</>
@@ -2893,9 +2860,48 @@ const Browselessons = () => {
           </motion.div>
         )}
 
-        {/* Invisible trigger for auto-loading */}
-        {!loading && !searchQuery.trim() && hasMore && (
-          <div ref={loadMoreRef} className="h-10" />
+        {/* Pagination controls */}
+        {!loading && !searchQuery.trim() && filteredlessons.length > itemsPerPage && (
+          <div className="flex items-center justify-center gap-2 py-8">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-4 py-2 rounded-lg border text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+            >
+              Previous
+            </button>
+            {Array.from({ length: Math.ceil(filteredlessons.length / itemsPerPage) }, (_, i) => i + 1)
+              .filter(page => page === 1 || page === Math.ceil(filteredlessons.length / itemsPerPage) || Math.abs(page - currentPage) <= 2)
+              .reduce<(number | '...')[]>((acc, page, idx, arr) => {
+                if (idx > 0 && (page as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                acc.push(page);
+                return acc;
+              }, [])
+              .map((page, idx) =>
+                page === '...' ? (
+                  <span key={`ellipsis-${idx}`} className="px-2 text-muted-foreground">…</span>
+                ) : (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page as number)}
+                    className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      currentPage === page
+                        ? 'bg-purple-600 text-white border-purple-600'
+                        : 'hover:bg-muted'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                )
+              )}
+            <button
+              onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredlessons.length / itemsPerPage), p + 1))}
+              disabled={currentPage === Math.ceil(filteredlessons.length / itemsPerPage)}
+              className="px-4 py-2 rounded-lg border text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+            >
+              Next
+            </button>
+          </div>
         )}
 
         {/* Results Summary — shown only during search */}
