@@ -849,8 +849,10 @@ const Browselessons = () => {
       const endIndex = startIndex + itemsPerPage;
       setDisplayedlessons(filteredlessons.slice(0, endIndex));
       setHasMore(endIndex < filteredlessons.length);
-      // Scroll to top smoothly when page changes
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      // Scroll to top only when filters reset the page (page 1), not when loading more
+      if (currentPage === 1) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     }
   }, [currentPage, filteredlessons, itemsPerPage, searchQuery]);
 

@@ -157,22 +157,6 @@ const CreateLesson = () => {
     return () => window.clearTimeout(timeoutId);
   }, [form, curriculum, isEditing]);
 
-  // Auto-fill duration from direct video files
-  useEffect(() => {
-    const url = form.videoUrl?.trim();
-    if (!url) return;
-    if (/^https?:\/\/.+\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url)) {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.onloadedmetadata = () => {
-        const minutes = Math.ceil(video.duration / 60);
-        if (minutes > 0 && isFinite(minutes)) {
-          setForm(prev => ({ ...prev, duration: minutes }));
-        }
-      };
-      video.src = url;
-    }
-  }, [form.videoUrl]);
 
   const saveProgressDraft = () => {
     setIsSavingProgress(true);
@@ -446,9 +430,7 @@ const CreateLesson = () => {
                       placeholder="30"
                     />
                     <p className="text-xs text-muted-foreground">
-                      {/^https?:\/\/.+\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(form.videoUrl || '')
-                        ? "⚡ Auto-filled from video file"
-                        : "Enter duration in minutes. Auto-filled for direct video files (not YouTube)."}
+                      Enter the lesson duration in minutes manually.
                     </p>
                   </div>
                 </div>
@@ -572,7 +554,7 @@ const CreateLesson = () => {
                       videoUrl={form.videoUrl}
                       title={form.title || "Lesson Preview"}
                       enableDownload={false}
-                      onDurationDetected={(mins) => setForm((prev) => ({ ...prev, duration: mins }))}
+                      onDurationDetected={undefined}
                     />
                   </div>
                 )}
