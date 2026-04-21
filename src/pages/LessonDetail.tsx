@@ -13,6 +13,7 @@ import { Quiz } from "@/components/Quiz";
 import CurriculumDisplay from "@/components/CurriculumDisplay";
 import { ArrowLeft, BookOpen, Brain, CheckCircle, PlayCircle, FileText, List, Lock, ShoppingCart } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useCart } from "@/contexts/CartContext";
 
 import { getLessonById, getLessonPreviewById, type Lesson, type Section, type Lecture } from "@/api/lessons";
 import { getQuizByLessonId } from "@/api/quizzes";
@@ -54,6 +55,7 @@ const LessonDetail = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const { addToCart, isInCart } = useCart();
   const [studentName, setStudentName] = useState<string>("");
   const [lesson, setLesson] = useState<LessonData | null>(null);
   const [quiz, setQuiz] = useState<QuizData | null>(null);
@@ -66,6 +68,9 @@ const LessonDetail = () => {
   const [previousScore, setPreviousScore] = useState<number | null>(null);
   const [hasAccess, setHasAccess] = useState<boolean>(false);
   const [checkingAccess, setCheckingAccess] = useState<boolean>(true);
+  const lessonAlreadyInCart = Boolean(
+    lesson && subject && grade && isInCart(subject, grade, lesson.term, lesson.id)
+  );
 
   // Video progress tracking
   const [videoResumePos, setVideoResumePos] = useState<number>(0);
@@ -149,6 +154,18 @@ const LessonDetail = () => {
       navigate("/auth");
     }
   }, [user, loading, navigate]);
+
+  const handleAddLessonToCart = useCallback(async () => {
+    if (!lesson || !subject || !grade) return;
+
+    await addToCart({
+      subject,
+      grade,
+      term: lesson.term,
+      lessonId: lesson.id,
+      title: lesson.title,
+    });
+  }, [addToCart, grade, lesson, subject]);
 
   useEffect(() => {
     const fetchLessonData = async () => {
@@ -320,18 +337,9 @@ const LessonDetail = () => {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <StudentHeader studentName={studentName} />
-        <main className="pt-24 pb-16 container mx-auto px-4">
-          <Button
-            variant="ghost"
-            onClick={() => navigate('/browse')}
-            className="gap-2 mb-6"
-          >
-            {/* <ArrowLeft className="w-4 h-4" />
-            Back to Browse */}
-          </Button>
-          
+        <main className="pt-24 pb-16 container mx-auto px-4 sm:px-6">
           <Card className="max-w-2xl mx-auto">
-            <CardContent className="py-16 text-center">
+            <CardContent className="px-4 py-12 sm:px-6 sm:py-16 text-center">
               <div className="w-16 h-16 mx-auto mb-4 bg-purple-100 dark:bg-purple-900 rounded-full flex items-center justify-center">
                 <Lock className="w-8 h-8 text-purple-600 dark:text-purple-300" />
               </div>
@@ -343,13 +351,10 @@ const LessonDetail = () => {
                 <h3 className="font-semibold text-lg mb-1">{lesson.title}</h3>
                 <p className="text-sm text-muted-foreground">{lesson.description}</p>
               </div>
-              <div className="flex gap-3 justify-center">
-                <Button onClick={() => navigate('/browse')} variant="outline">
-                  Browse lessonss
-                </Button>
-                <Button onClick={() => navigate('/cart')} className="gap-2">
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <Button onClick={handleAddLessonToCart} className="gap-2 w-full sm:w-auto" disabled={lessonAlreadyInCart}>
                   <ShoppingCart className="w-4 h-4" />
-                  Go to Cart
+                  {lessonAlreadyInCart ? 'Added to Cart' : 'Add to Cart'}
                 </Button>
               </div>
             </CardContent>

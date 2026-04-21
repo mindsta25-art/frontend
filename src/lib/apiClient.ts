@@ -195,12 +195,11 @@ const getApiBaseUrl = () => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
-const IS_DEV = import.meta.env.DEV;
 
-// Only log in development
-const log = IS_DEV ? console.log.bind(console) : () => {};
-const warn = IS_DEV ? console.warn.bind(console) : () => {};
-const error = console.error.bind(console); // always log real errors
+// Logging suppressed — no user/app data on console
+const log = (_msg: string, ..._args: any[]) => {}; // eslint-disable-line @typescript-eslint/no-unused-vars
+const warn = (_msg: string, ..._args: any[]) => {}; // eslint-disable-line @typescript-eslint/no-unused-vars
+const error = (_msg: string, ..._args: any[]) => {}; // eslint-disable-line @typescript-eslint/no-unused-vars
 
 /**
  * Make an API request with timeout

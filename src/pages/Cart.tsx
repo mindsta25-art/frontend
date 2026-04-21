@@ -182,7 +182,7 @@ const Cart = () => {
                 </p>
                 <Button onClick={() => navigate("/browse")} size="lg" className="gap-2 w-full sm:w-auto">
                   <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
-                  Browse lessonss
+                  Browse Courses
                 </Button>
               </div>
             </Card>

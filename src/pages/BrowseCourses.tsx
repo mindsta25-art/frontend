@@ -36,7 +36,6 @@ import {
   Loader2,
   Play,
   Users,
-  Award,
   Zap,
   X,
   Eye,
@@ -49,12 +48,12 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronLeft,
+  ChevronRight,
   MoreVertical,
   Package,
   BarChart3,
   Target,
   PlayCircle,
-  ChevronRight,
   PanelLeftOpen,
   PanelLeftClose,
   ShoppingBag,
@@ -66,7 +65,7 @@ import {
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { useToast } from "@/hooks/use-toast";
 import { isEnrolled as isEnrolledUtil } from "@/utils/enrollmentUtils";
-import { getLessons, getLessonPreviewById, type Lesson } from "@/api/lessons";
+import { getLessons, getLessonPreviewById, type Lesson, getLessonsBySubjectAndGrade } from "@/api/lessons";
 import { getQuizzesByFilters } from "@/api/quizzes";
 import { getUserProgress, type UserProgress } from "@/api/progress";
 import { getStudentByUserId } from "@/api";
@@ -129,6 +128,10 @@ const Browselessons = () => {
 
   const [lessons, setlessons] = useState<Course[]>([]);
   const [filteredlessons, setFilteredlessons] = useState<Course[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 12;
+  const [currentRecommendationPage, setCurrentRecommendationPage] = useState(1);
+  const recommendationItemsPerPage = 12;
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedGrade, setSelectedGrade] = useState(searchParams.get('grade') || 'all');
@@ -196,10 +199,6 @@ const Browselessons = () => {
   const [selectedCourseForPreview, setSelectedCourseForPreview] = useState<Lesson | null>(null);
   const [loadingPreviewId, setLoadingPreviewId] = useState<string | null>(null);
   
-  // Pagination state
-  const [itemsPerPage, setItemsPerPage] = useState(12);
-  const [currentPage, setCurrentPage] = useState(1);
-
   // Enrollment counts per subject-grade-term (for student count display)
   const [enrollmentCounts, setEnrollmentCounts] = useState<Record<string, number>>({});
   const enrollmentCountsRef = useRef<Record<string, number>>({});
@@ -362,8 +361,16 @@ const Browselessons = () => {
 
     return Array.from(recommendedSet.values())
       .sort((a, b) => b.score - a.score)
-      .slice(0, 8);
+      .slice(0, 24);
   };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const recommendations = useMemo(() => getRecommendedlessons(), [lessons, previewedlessons, searchHistory, studentGrade]);
+  const totalRecommendationPages = Math.ceil(recommendations.length / recommendationItemsPerPage);
+  const paginatedRecommendations = recommendations.slice(
+    (currentRecommendationPage - 1) * recommendationItemsPerPage,
+    currentRecommendationPage * recommendationItemsPerPage,
+  );
 
   // Debounced search with better suggestions - shows actual lessons
   useEffect(() => {
@@ -592,6 +599,21 @@ const Browselessons = () => {
     setFilteredlessons(filtered);
   }, [lessons, showOnlyPurchased, showFreeOnly, searchQuery, selectedTopic, selectedGrade, selectedSubject, selectedTerm, sortBy, selectedDifficulties, minRating, priceRange, selectedCategory, isPriceFilterActive]);
 
+  // Reset to page 1 whenever the filtered list or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filteredlessons, searchQuery]);
+
+  useEffect(() => {
+    setCurrentRecommendationPage(1);
+  }, [recommendations.length]);
+
+  useEffect(() => {
+    if (currentRecommendationPage > totalRecommendationPages && totalRecommendationPages > 0) {
+      setCurrentRecommendationPage(totalRecommendationPages);
+    }
+  }, [currentRecommendationPage, totalRecommendationPages]);
+
   const updateAvailableSubjects = useCallback(() => {
     // Filter lessons by selected grade first, then extract unique subjects
     let lessonsToCheck = [...lessons];
@@ -683,9 +705,6 @@ const Browselessons = () => {
 
   // useEffects after function definitions
   useEffect(() => {
-    // Use default items per page (settings endpoint requires admin access)
-    setItemsPerPage(12);
-    
     if (user?.id) {
       fetchStudentInfo();
     } else {
@@ -831,12 +850,6 @@ const Browselessons = () => {
       setPriceRange(([min, max]) => [min, Math.min(max, maxPriceLimit)]);
     }
   }, [maxPriceLimit, isPriceFilterActive]);
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filteredlessons]);
-
 
   // Ctrl+K / Cmd+K keyboard shortcut to focus search
   useEffect(() => {
@@ -1213,62 +1226,106 @@ const Browselessons = () => {
       } else {
         lessons = await getLessonsBySubjectAndGrade(course.subject, course.grade, course.term);
       }
-      
-      if (lessons.length > 0) {
-        // Build a composite "course" object: each lesson becomes one curriculum section
-        const compositeCourse: Lesson = {
-          id: lessons[0].id,
-          title: course.lessonId ? (lessons[0].title || course.subject) : course.subject,
+
+      // Build a preview from the API data if available, otherwise fall back to the card data
+      const buildComposite = (lessonList: Lesson[]): Lesson => {
+        if (lessonList.length > 0) {
+          return {
+            id: lessonList[0].id,
+            title: course.lessonId ? (lessonList[0].title || course.subject) : course.subject,
+            subtitle: `Grade ${course.grade}${course.term ? ` • ${course.term}` : ''}`,
+            description: lessonList[0].description || course.description,
+            subject: course.subject,
+            grade: course.grade,
+            term: lessonList[0].term,
+            difficulty: (lessonList[0].difficulty || course.difficulty) as Lesson['difficulty'],
+            duration: lessonList.reduce((sum, l) => sum + (l.duration || 0), 0),
+            imageUrl: course.imageUrl || lessonList[0].imageUrl,
+            whatYouWillLearn: lessonList[0].whatYouWillLearn,
+            requirements: lessonList[0].requirements,
+            targetAudience: lessonList[0].targetAudience,
+            learningObjectives: lessonList[0].learningObjectives,
+            price: course.price,
+            rating: course.rating,
+            ratingsCount: course.reviewCount || 0,
+            enrolledStudents: course.studentCount,
+            createdAt: lessonList[0].createdAt,
+            quizCount: course.quizCount,
+            curriculum: lessonList.map((lesson, idx) => ({
+              title: lesson.title,
+              description: lesson.description,
+              order: idx,
+              lectures: lesson.curriculum && lesson.curriculum.length > 0
+                ? lesson.curriculum.flatMap(section => section.lectures)
+                : [{
+                    title: lesson.title,
+                    type: 'video' as const,
+                    duration: lesson.duration || 30,
+                    order: 0,
+                    isPreview: idx === 0,
+                  }],
+            })),
+          };
+        }
+        // Fallback: build from card data when API returned nothing
+        return {
+          id: course.id,
+          title: course.lessonTitle || course.subject,
           subtitle: `Grade ${course.grade}${course.term ? ` • ${course.term}` : ''}`,
-          description: lessons[0].description || course.description,
+          description: course.description,
           subject: course.subject,
           grade: course.grade,
-          term: lessons[0].term,
-          difficulty: (lessons[0].difficulty || course.difficulty) as Lesson['difficulty'],
-          duration: lessons.reduce((sum, l) => sum + (l.duration || 0), 0),
-          imageUrl: course.imageUrl || lessons[0].imageUrl,
-          whatYouWillLearn: lessons[0].whatYouWillLearn,
-          requirements: lessons[0].requirements,
-          targetAudience: lessons[0].targetAudience,
-          learningObjectives: lessons[0].learningObjectives,
+          term: course.term,
+          difficulty: course.difficulty as Lesson['difficulty'],
+          duration: course.estimatedHours * 60,
+          imageUrl: course.imageUrl,
           price: course.price,
           rating: course.rating,
           ratingsCount: course.reviewCount || 0,
           enrolledStudents: course.studentCount,
-          createdAt: lessons[0].createdAt,
+          createdAt: course.createdAt,
           quizCount: course.quizCount,
-          // Each lesson becomes a section; expose its existing curriculum lectures, or a single placeholder entry
-          curriculum: lessons.map((lesson, idx) => ({
-            title: lesson.title,
-            description: lesson.description,
-            order: idx,
-            lectures: lesson.curriculum && lesson.curriculum.length > 0
-              ? lesson.curriculum.flatMap(section => section.lectures)
-              : [{
-                  title: lesson.title,
-                  type: 'video' as const,
-                  duration: lesson.duration || 30,
-                  order: 0,
-                  isPreview: idx === 0,
-                }],
-          })),
+          curriculum: [{
+            title: course.lessonTitle || course.subject,
+            description: course.description,
+            order: 0,
+            lectures: [{
+              title: course.lessonTitle || course.subject,
+              type: 'video' as const,
+              duration: course.estimatedHours * 60 || 30,
+              order: 0,
+              isPreview: true,
+            }],
+          }],
         };
-        setSelectedCourseForPreview(compositeCourse);
-        setPreviewDialogOpen(true);
-      } else {
-        toast({
-          title: "No Content",
-          description: "No lessons yet.",
-          variant: "destructive"
-        });
-      }
+      };
+
+      setSelectedCourseForPreview(buildComposite(lessons));
+      setPreviewDialogOpen(true);
     } catch (error) {
       console.error('Error loading course preview:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load course preview. Please try again.",
-        variant: "destructive"
-      });
+      // Even on hard error, show the dialog with whatever card data we have
+      const fallback: Lesson = {
+        id: course.id,
+        title: course.lessonTitle || course.subject,
+        subtitle: `Grade ${course.grade}${course.term ? ` • ${course.term}` : ''}`,
+        description: course.description,
+        subject: course.subject,
+        grade: course.grade,
+        term: course.term,
+        difficulty: course.difficulty as Lesson['difficulty'],
+        duration: course.estimatedHours * 60,
+        imageUrl: course.imageUrl,
+        price: course.price,
+        rating: course.rating,
+        ratingsCount: course.reviewCount || 0,
+        enrolledStudents: course.studentCount,
+        createdAt: course.createdAt,
+        quizCount: course.quizCount,
+        curriculum: [],
+      };
+      setSelectedCourseForPreview(fallback);
+      setPreviewDialogOpen(true);
     } finally {
       setLoadingPreviewId(null);
     }
@@ -1362,14 +1419,6 @@ const Browselessons = () => {
         return 'bg-muted text-muted-foreground';
     }
   };
-
-  // Pagination — computed directly like LessonManagement
-  const totalPages = Math.ceil(filteredlessons.length / itemsPerPage);
-  const pageStartIndex = (currentPage - 1) * itemsPerPage;
-  const pageEndIndex = pageStartIndex + itemsPerPage;
-  const paginatedLessons = searchQuery.trim()
-    ? filteredlessons
-    : filteredlessons.slice(pageStartIndex, pageEndIndex);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 dark:from-gray-950 dark:via-purple-950/20 dark:to-gray-950">
@@ -2105,9 +2154,6 @@ const Browselessons = () => {
                   </h2>
                   <p className="text-sm text-muted-foreground">
                     {enrollments.length} enrolled • {filteredlessons.filter(c => !c.enrolled).length} available
-                    {!searchQuery.trim() && filteredlessons.length > itemsPerPage && (
-                      <> • Page {currentPage} of {Math.ceil(filteredlessons.length / itemsPerPage)}</>
-                    )}
                     {isLoadingBackground && (
                       <> • Loading more grades...</>
                     )}
@@ -2432,13 +2478,14 @@ const Browselessons = () => {
             </Card>
           </motion.div>
         ) : (
+          <>
           <motion.div
             variants={staggerContainer}
             initial="hidden"
             animate="visible"
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-8 mb-10"
           >
-            {paginatedLessons.map((course) => (
+            {(searchQuery.trim() ? filteredlessons : filteredlessons.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)).map((course) => (
               <motion.div
                 key={course.id}
                 variants={fadeInUp}
@@ -2809,10 +2856,6 @@ const Browselessons = () => {
                             <span className="text-2xl font-extrabold text-gray-900 dark:text-white leading-none">
                               {formatCurrency(course.price)}
                             </span>
-                            <div className="flex items-center gap-1">
-                              <Award className="w-3.5 h-3.5 text-purple-500" />
-                              <span className="text-[10px] text-muted-foreground font-medium">Certificate</span>
-                            </div>
                           </div>
                           <div className="flex gap-2">
                             <Button 
@@ -2855,40 +2898,79 @@ const Browselessons = () => {
               </motion.div>
             ))}
           </motion.div>
+
+          {/* Pagination Controls — shown when not searching */}
+          {!loading && !searchQuery.trim() && filteredlessons.length > itemsPerPage && (
+            <div className="flex flex-col items-center gap-3 mt-10 pt-6 border-t">
+              <p className="text-xs sm:text-sm text-muted-foreground font-medium">
+                Showing {Math.min((currentPage - 1) * itemsPerPage + 1, filteredlessons.length)}–{Math.min(currentPage * itemsPerPage, filteredlessons.length)} of {filteredlessons.length} lesson{filteredlessons.length !== 1 ? 's' : ''}
+              </p>
+              <div className="flex items-center gap-1 sm:gap-2">
+                {Math.ceil(filteredlessons.length / itemsPerPage) > 5 && (
+                  <Button variant="outline" size="sm" className="hidden sm:flex w-9 h-9 p-0"
+                    onClick={() => { setCurrentPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    disabled={currentPage === 1} aria-label="First page">
+                    «
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="gap-1 h-9 px-2.5 sm:px-3"
+                  onClick={() => { setCurrentPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  disabled={currentPage === 1}>
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="sr-only sm:not-sr-only">Prev</span>
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {(() => {
+                    const totalPages = Math.ceil(filteredlessons.length / itemsPerPage);
+                    const pages: number[] = [];
+                    if (totalPages <= 5) {
+                      for (let i = 1; i <= totalPages; i++) pages.push(i);
+                    } else if (currentPage <= 3) {
+                      pages.push(1, 2, 3, -1, totalPages);
+                    } else if (currentPage >= totalPages - 2) {
+                      pages.push(1, -1, totalPages - 2, totalPages - 1, totalPages);
+                    } else {
+                      pages.push(1, -1, currentPage - 1, currentPage, currentPage + 1, -2, totalPages);
+                    }
+                    return pages.map((page, idx) => {
+                      if (page < 0) return (
+                        <span key={`e-${idx}`} className="hidden sm:inline-flex w-9 h-9 items-center justify-center text-muted-foreground text-sm">…</span>
+                      );
+                      const isCurrent = currentPage === page;
+                      const showOnMobile = Math.abs(page - currentPage) <= 1 || page === 1 || page === totalPages;
+                      return (
+                        <Button key={page} variant={isCurrent ? 'default' : 'outline'} size="sm"
+                          onClick={() => { setCurrentPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                          className={`w-9 h-9 p-0 ${isCurrent ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-0 shadow-sm' : ''} ${!showOnMobile ? 'hidden sm:inline-flex' : ''}`}
+                          aria-current={isCurrent ? 'page' : undefined}>
+                          {page}
+                        </Button>
+                      );
+                    });
+                  })()}
+                </div>
+
+                <Button variant="outline" size="sm" className="gap-1 h-9 px-2.5 sm:px-3"
+                  onClick={() => { setCurrentPage(p => Math.min(Math.ceil(filteredlessons.length / itemsPerPage), p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  disabled={currentPage >= Math.ceil(filteredlessons.length / itemsPerPage)}>
+                  <span className="sr-only sm:not-sr-only">Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+                {Math.ceil(filteredlessons.length / itemsPerPage) > 5 && (
+                  <Button variant="outline" size="sm" className="hidden sm:flex w-9 h-9 p-0"
+                    onClick={() => { setCurrentPage(Math.ceil(filteredlessons.length / itemsPerPage)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    disabled={currentPage >= Math.ceil(filteredlessons.length / itemsPerPage)} aria-label="Last page">
+                    »
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          </>
         )}
 
-        {/* Pagination — same pattern as LessonManagement */}
-        {!loading && !searchQuery.trim() && filteredlessons.length > 0 && (
-          <Card className="mt-4">
-            <CardContent className="pt-6">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                <span className="text-sm text-muted-foreground">
-                  Showing {filteredlessons.length === 0 ? 0 : pageStartIndex + 1} to {Math.min(pageEndIndex, filteredlessons.length)} of {filteredlessons.length} lessons
-                </span>
-                <div className="flex items-center gap-2">
-                  <Select value={itemsPerPage.toString()} onValueChange={(v) => { setItemsPerPage(Number(v)); setCurrentPage(1); }}>
-                    <SelectTrigger className="w-[110px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="6">6 / page</SelectItem>
-                      <SelectItem value="12">12 / page</SelectItem>
-                      <SelectItem value="24">24 / page</SelectItem>
-                      <SelectItem value="48">48 / page</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                    <ChevronLeft className="w-4 h-4" />
-                  </Button>
-                  <span className="text-sm font-medium whitespace-nowrap">Page {currentPage} of {totalPages}</span>
-                  <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+
 
         {/* Results Summary — shown only during search */}
         {!loading && filteredlessons.length > 0 && searchQuery.trim() && (
@@ -3030,7 +3112,6 @@ const Browselessons = () => {
 
         {/* Recommended for You Section */}
         {(() => {
-          const recommendations = getRecommendedlessons();
           if (loading || recommendations.length === 0) return null;
 
           const reasonStyles: Record<string, {
@@ -3054,7 +3135,7 @@ const Browselessons = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
-              className="mb-12"
+              className="mt-8 sm:mt-12 mb-12"
             >
               {/* Section Header */}
               <div className="relative mb-5 sm:mb-8">
@@ -3101,7 +3182,7 @@ const Browselessons = () => {
 
               {/* Cards — same mobile horizontal / desktop vertical split as main grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
-                {recommendations.map((rec, index) => {
+                {paginatedRecommendations.map((rec, index) => {
                   const course: Course = rec.course;
                   const { reason, reasonType } = rec;
                   const style = reasonStyles[reasonType] ?? reasonStyles['popular'];
@@ -3254,6 +3335,103 @@ const Browselessons = () => {
                   );
                 })}
               </div>
+
+              {recommendations.length > recommendationItemsPerPage && (
+                <div className="flex flex-col items-center gap-3 mt-8 pt-6 border-t border-purple-100 dark:border-purple-900/30">
+                  <p className="text-xs sm:text-sm text-muted-foreground font-medium">
+                    Showing {Math.min((currentRecommendationPage - 1) * recommendationItemsPerPage + 1, recommendations.length)}–{Math.min(currentRecommendationPage * recommendationItemsPerPage, recommendations.length)} of {recommendations.length} recommendations
+                  </p>
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    {totalRecommendationPages > 5 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="hidden sm:flex w-9 h-9 p-0"
+                        onClick={() => { setCurrentRecommendationPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={currentRecommendationPage === 1}
+                        aria-label="First recommendations page"
+                      >
+                        «
+                      </Button>
+                    )}
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1 h-9 px-2.5 sm:px-3"
+                      onClick={() => { setCurrentRecommendationPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                      disabled={currentRecommendationPage === 1}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span className="sr-only sm:not-sr-only">Prev</span>
+                    </Button>
+
+                    <div className="flex items-center gap-1">
+                      {(() => {
+                        const pages: number[] = [];
+                        if (totalRecommendationPages <= 5) {
+                          for (let i = 1; i <= totalRecommendationPages; i++) pages.push(i);
+                        } else if (currentRecommendationPage <= 3) {
+                          pages.push(1, 2, 3, -1, totalRecommendationPages);
+                        } else if (currentRecommendationPage >= totalRecommendationPages - 2) {
+                          pages.push(1, -1, totalRecommendationPages - 2, totalRecommendationPages - 1, totalRecommendationPages);
+                        } else {
+                          pages.push(1, -1, currentRecommendationPage - 1, currentRecommendationPage, currentRecommendationPage + 1, -2, totalRecommendationPages);
+                        }
+                        return pages.map((page, idx) => {
+                          if (page < 0) {
+                            return (
+                              <span key={`rec-e-${idx}`} className="hidden sm:inline-flex w-9 h-9 items-center justify-center text-muted-foreground text-sm">
+                                …
+                              </span>
+                            );
+                          }
+
+                          const isCurrent = currentRecommendationPage === page;
+                          const showOnMobile = Math.abs(page - currentRecommendationPage) <= 1 || page === 1 || page === totalRecommendationPages;
+
+                          return (
+                            <Button
+                              key={page}
+                              variant={isCurrent ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => { setCurrentRecommendationPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                              className={`w-9 h-9 p-0 ${isCurrent ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-0 shadow-sm' : ''} ${!showOnMobile ? 'hidden sm:inline-flex' : ''}`}
+                              aria-current={isCurrent ? 'page' : undefined}
+                            >
+                              {page}
+                            </Button>
+                          );
+                        });
+                      })()}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1 h-9 px-2.5 sm:px-3"
+                      onClick={() => { setCurrentRecommendationPage(p => Math.min(totalRecommendationPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                      disabled={currentRecommendationPage >= totalRecommendationPages}
+                    >
+                      <span className="sr-only sm:not-sr-only">Next</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+
+                    {totalRecommendationPages > 5 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="hidden sm:flex w-9 h-9 p-0"
+                        onClick={() => { setCurrentRecommendationPage(totalRecommendationPages); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        disabled={currentRecommendationPage >= totalRecommendationPages}
+                        aria-label="Last recommendations page"
+                      >
+                        »
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
             </motion.div>
           );
         })()}
