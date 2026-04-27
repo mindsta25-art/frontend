@@ -555,7 +555,7 @@ export default function SearchResults() {
 
       <StudentFooter />
 
-      {/* Course Preview Dialog */}
+      {/*Lesson Preview Dialog */}
       <CoursePreviewDialog
         open={previewDialogOpen}
         onOpenChange={setPreviewDialogOpen}

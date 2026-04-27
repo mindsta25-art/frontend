@@ -332,7 +332,7 @@ const LessonDetail = () => {
     );
   }
 
-  // Show access denied if user hasn't purchased this course
+  // Show access denied if user hasn't purchased this Lesson
   if (!hasAccess && lesson) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -345,7 +345,7 @@ const LessonDetail = () => {
               </div>
               <h2 className="text-2xl font-bold mb-2">Lesson Locked</h2>
               <p className="text-muted-foreground mb-6">
-                Purchase this course to access this lesson and all course materials.
+                Purchase this lesson to access this lesson and all lesson materials.
               </p>
               <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-6">
                 <h3 className="font-semibold text-lg mb-1">{lesson.title}</h3>
@@ -483,7 +483,7 @@ const LessonDetail = () => {
                   </div>
                 )}
 
-                {/* Course Info Card */}
+                {/*Lesson Info Card */}
                 <Card>
                   <CardContent className="p-6">
                     <Badge variant="secondary" className="mb-3">

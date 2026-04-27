@@ -21,7 +21,7 @@ const FAQPage = () => {
       questions: [
         {
           q: 'How do I enroll in a lessons?',
-          a: 'To enroll in a lesson, browse our lesson catalog, select your grade and subject, then click the "Enroll Now" button. Payment options will be presented for your chosen course.',
+          a: 'To enroll in a lesson, browse our lesson catalog, select your grade and subject, then click the "Enroll Now" button. Payment options will be presented for your chosen lesson.',
         },
         {
           q: 'How do I access my enrolled lessons?',

@@ -62,7 +62,7 @@ const HelpCenter = () => {
       description: 'Payment methods, refunds, and billing',
       articles: [
         'Accepted payment methods',
-        'How to purchase a course',
+        'How to purchase a lesson',
         'Refund policy',
         'Bundle discounts',
       ],

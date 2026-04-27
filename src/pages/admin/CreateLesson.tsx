@@ -363,7 +363,7 @@ const CreateLesson = () => {
                   <Textarea
                     value={form.overview}
                     onChange={(e) => setForm({ ...form, overview: e.target.value })}
-                    placeholder="What will students learn in this course?"
+                    placeholder="What will students learn in this lesson?"
                     className="min-h-[100px]"
                   />
                 </div>
@@ -578,12 +578,12 @@ const CreateLesson = () => {
               </CardContent>
             </Card>
 
-            {/* Course Details */}
+            {/* Lesson Details */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <CheckCircle className="w-5 h-5 text-green-600" />
-                  Course Details (Shown on Student Overview)
+                  Lesson Details (Shown on Student Overview)
                 </CardTitle>
                 <CardDescription>These appear on the student's subject overview page</CardDescription>
               </CardHeader>
@@ -677,8 +677,8 @@ const CreateLesson = () => {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-lg">📑 Course Curriculum (Optional)</CardTitle>
-                    <CardDescription>Add sections and lectures to structure your course content</CardDescription>
+                    <CardTitle className="text-lg">📑 Lesson Curriculum (Optional)</CardTitle>
+                    <CardDescription>Add sections and lectures to structure your lesson content</CardDescription>
                   </div>
                   <Button
                     type="button"
@@ -694,7 +694,7 @@ const CreateLesson = () => {
               <CardContent className="space-y-4">
                 {curriculum.length === 0 ? (
                   <div className="border-2 border-dashed rounded-lg p-8 text-center text-muted-foreground">
-                    <p className="text-sm">No sections yet. Click "Add Section" to begin structuring your course.</p>
+                    <p className="text-sm">No sections yet. Click "Add Section" to begin structuring your lesson.</p>
                   </div>
                 ) : (
                   <div className="space-y-4">

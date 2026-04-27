@@ -483,10 +483,10 @@ const Profile = () => {
               <CardContent className="pt-4">
                 <div className="grid sm:grid-cols-2 gap-2">
                   {[
-                    { label: 'My Learning', desc: 'View enrolled courses', href: '/my-learning', icon: BookOpen, gradient: 'from-cyan-500 to-blue-500' },
+                    { label: 'My Learning', desc: 'View enrolled lessons', href: '/my-learning', icon: BookOpen, gradient: 'from-cyan-500 to-blue-500' },
                     { label: 'Achievements', desc: 'Badges & milestones', href: '/achievements', icon: Award, gradient: 'from-amber-500 to-orange-500' },
                     { label: 'Progress', desc: 'Analytics & streaks', href: '/progress', icon: TrendingUp, gradient: 'from-indigo-500 to-violet-500' },
-                    { label: 'Browse Courses', desc: 'Find new subjects', href: '/browse', icon: GraduationCap, gradient: 'from-emerald-500 to-cyan-500' },
+                    { label: 'Browse Lessons', desc: 'Find new subjects', href: '/browse', icon: GraduationCap, gradient: 'from-emerald-500 to-cyan-500' },
                   ].map(link => (
                     <Link key={link.href} to={link.href}
                       className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-indigo-50/40 dark:hover:bg-indigo-900/10 transition-all group"
