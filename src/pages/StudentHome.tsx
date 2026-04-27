@@ -474,7 +474,7 @@ const StudentHome = () => {
     },
     {
       icon: BookMarked,
-      label: 'Enrolled Subjects',
+      label: 'Enrolled Lessons',
       value: totalEnrollments.toString(),
       gradient: 'from-blue-500 to-cyan-500',
     },
@@ -1068,7 +1068,7 @@ const StudentHome = () => {
                             {/* Subject / grade / lesson fraction */}
                             <p className="text-xs text-muted-foreground mb-2">
                               Grade {course.grade}{course.term ? ` · ${course.term}` : ''}
-                              {' · '}<span className="font-medium text-foreground/70">{course.lessonsCompleted}/{course.lessonsTotal}</span> lessons
+                              {course.lessonsTotal > 0 && <>{' · '}<span className="font-medium text-foreground/70">{course.lessonsCompleted}/{course.lessonsTotal}</span> lessons</>}
                             </p>
 
                             {/* Progress bar */}

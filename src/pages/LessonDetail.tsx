@@ -322,7 +322,7 @@ const LessonDetail = () => {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <StudentHeader studentName={studentName} />
-        <div className="pt-24 container mx-auto px-4 flex items-center justify-center" style={{minHeight: 'calc(100vh - 96px)'}}>
+        <div className="pt-2 sm:pt-6 container mx-auto px-4 flex items-center justify-center" style={{minHeight: 'calc(100vh - 80px)'}}>
           <div className="text-center">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-600 mx-auto mb-3"></div>
             <p className="text-sm font-semibold text-muted-foreground">Loading lesson...</p>
@@ -337,7 +337,7 @@ const LessonDetail = () => {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <StudentHeader studentName={studentName} />
-        <main className="pt-24 pb-16 container mx-auto px-4 sm:px-6">
+        <main className="pt-2 sm:pt-6 pb-12 sm:pb-16 container mx-auto px-4 sm:px-6">
           <Card className="max-w-2xl mx-auto">
             <CardContent className="px-4 py-12 sm:px-6 sm:py-16 text-center">
               <div className="w-16 h-16 mx-auto mb-4 bg-purple-100 dark:bg-purple-900 rounded-full flex items-center justify-center">
@@ -368,7 +368,7 @@ const LessonDetail = () => {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <StudentHeader studentName={studentName} />
-        <div className="pt-24 container mx-auto px-4 flex items-center justify-center" style={{minHeight: 'calc(100vh - 96px)'}}>
+        <div className="pt-2 sm:pt-6 container mx-auto px-4 flex items-center justify-center" style={{minHeight: 'calc(100vh - 80px)'}}>
           <div className="text-center">
             <div className="text-6xl mb-4">📖</div>
             <p className="text-xl font-bold text-muted-foreground mb-4">Lesson not found</p>

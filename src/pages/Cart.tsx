@@ -134,7 +134,7 @@ const Cart = () => {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <StudentHeader studentName={studentName} />
-        <div className="pt-24 container mx-auto px-4">
+        <div className="pt-2 sm:pt-6 container mx-auto px-4">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded w-1/4"></div>
             <div className="h-64 bg-gray-200 dark:bg-gray-800 rounded"></div>
@@ -159,7 +159,7 @@ const Cart = () => {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <StudentHeader studentName={studentName} />
 
-      <main className="pt-24 pb-16 container mx-auto px-4">
+      <main className="pt-2 sm:pt-6 pb-12 sm:pb-16 container mx-auto px-4">
         <div className="max-w-6xl mx-auto">
           {/* Header */}
           <div className="mb-6 sm:mb-8">

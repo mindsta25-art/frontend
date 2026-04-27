@@ -197,7 +197,7 @@ const Profile = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
         <StudentHeader studentName="" />
-        <main className="pt-20 pb-16">
+        <main className="pt-2 sm:pt-6 pb-12 sm:pb-16">
           <div className="container mx-auto px-4 max-w-4xl space-y-6 py-8">
             <Skeleton className="h-52 w-full rounded-2xl" />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -214,7 +214,7 @@ const Profile = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
       <StudentHeader studentName={fullName} />
 
-      <main className="pt-20 pb-16">
+      <main className="pt-2 sm:pt-6 pb-12 sm:pb-16">
         <div className="container mx-auto px-4 max-w-4xl py-8 space-y-6">
 
           {/* ── Hero / Avatar Banner ──────────────────────────────────────── */}
